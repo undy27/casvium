@@ -78,6 +78,80 @@ class Room {
   Color get color => CasviumColors.fromHex(colorHex);
 }
 
+enum TaskFrequency {
+  none('Sin periodicidad'),
+  daily('Diaria'),
+  threeTimesWeekly('3 veces/sem', '3 veces por semana (lun., mié. y vie.)'),
+  twiceWeekly('2 veces/sem', '2 veces por semana (lun. y jue.)'),
+  weekly('Semanal'),
+  fortnightly('Quincenal'),
+  monthly('Mensual');
+
+  const TaskFrequency(this.storageLabel, [String? label])
+      : label = label ?? storageLabel;
+
+  final String storageLabel;
+  final String label;
+
+  static TaskFrequency fromLabel(String label) {
+    final normalized = label.trim().toLowerCase();
+    return values.firstWhere(
+      (frequency) => frequency.storageLabel.toLowerCase() == normalized,
+      orElse: () => none,
+    );
+  }
+
+  DateTime? nextAfter(DateTime reference) {
+    final day = reference.toLocal();
+    return switch (this) {
+      none => null,
+      daily => _addDays(day, 1),
+      threeTimesWeekly => _nextWeekday(day, const {
+          DateTime.monday,
+          DateTime.wednesday,
+          DateTime.friday,
+        }),
+      twiceWeekly => _nextWeekday(day, const {
+          DateTime.monday,
+          DateTime.thursday,
+        }),
+      weekly => _addDays(day, 7),
+      fortnightly => _addDays(day, 14),
+      monthly => _nextMonth(day),
+    };
+  }
+
+  static DateTime _addDays(DateTime date, int days) =>
+      DateTime(date.year, date.month, date.day + days);
+
+  static DateTime _nextWeekday(DateTime date, Set<int> weekdays) {
+    var next = _addDays(date, 1);
+    while (!weekdays.contains(next.weekday)) {
+      next = _addDays(next, 1);
+    }
+    return next;
+  }
+
+  static DateTime _nextMonth(DateTime date) {
+    final lastDay = DateTime(date.year, date.month + 2, 0).day;
+    return DateTime(date.year, date.month + 1, date.day.clamp(1, lastDay));
+  }
+}
+
+enum TaskDeadlineStatus { overdue, today, upcoming }
+
+class TaskDeadline {
+  final ChoreTask task;
+  final DateTime date;
+  final TaskDeadlineStatus status;
+
+  const TaskDeadline({
+    required this.task,
+    required this.date,
+    required this.status,
+  });
+}
+
 class ChoreTask {
   final String id;
   final String householdId;
@@ -87,7 +161,8 @@ class ChoreTask {
   final List<String> roomIds; // Puede asociarse a una o varias estancias
   final int estimatedMinutes; // Duración estimada establecida por el usuario
   final bool isShared; // Tarea compartida entre miembros
-  final String frequencyLabel;
+  final TaskFrequency frequency;
+  final DateTime createdAt;
   final int intensity; // 1 = Suave, 2 = Media, 3 = Intensa
 
   const ChoreTask({
@@ -99,7 +174,8 @@ class ChoreTask {
     required this.roomIds,
     required this.estimatedMinutes,
     this.isShared = true,
-    this.frequencyLabel = 'Semanal',
+    this.frequency = TaskFrequency.weekly,
+    required this.createdAt,
     this.intensity = 2,
   });
 
@@ -110,7 +186,7 @@ class ChoreTask {
     List<String>? roomIds,
     int? estimatedMinutes,
     bool? isShared,
-    String? frequencyLabel,
+    TaskFrequency? frequency,
     int? intensity,
   }) {
     return ChoreTask(
@@ -122,7 +198,8 @@ class ChoreTask {
       roomIds: roomIds ?? this.roomIds,
       estimatedMinutes: estimatedMinutes ?? this.estimatedMinutes,
       isShared: isShared ?? this.isShared,
-      frequencyLabel: frequencyLabel ?? this.frequencyLabel,
+      frequency: frequency ?? this.frequency,
+      createdAt: createdAt,
       intensity: intensity ?? this.intensity,
     );
   }

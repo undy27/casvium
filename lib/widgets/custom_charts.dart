@@ -34,14 +34,15 @@ class MemberEquityRingChart extends StatelessWidget {
     final totalMinutes =
         minutesByMember.values.fold<int>(0, (sum, item) => sum + item);
 
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0, end: 1),
-      duration: const Duration(milliseconds: 900),
-      curve: Curves.easeOutCubic,
-      builder: (context, progress, _) {
-        return Row(
-          children: [
-            SizedBox(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final stack = constraints.maxWidth < 320;
+        return TweenAnimationBuilder<double>(
+          tween: Tween(begin: 0, end: 1),
+          duration: const Duration(milliseconds: 900),
+          curve: Curves.easeOutCubic,
+          builder: (context, progress, _) {
+            final chart = SizedBox(
               width: 150,
               height: 150,
               child: CustomPaint(
@@ -77,86 +78,99 @@ class MemberEquityRingChart extends StatelessWidget {
                   ),
                 ),
               ),
-            ),
-            const SizedBox(width: 18),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: members.map((member) {
-                  final mins = minutesByMember[member.id] ?? 0;
-                  final pct = totalMinutes > 0
-                      ? ((mins / totalMinutes) * 100).round()
-                      : 0;
-                  return Padding(
-                    padding: const EdgeInsets.only(bottom: 10),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          children: [
-                            Container(
-                              width: 14,
-                              height: 14,
+            );
+            final legend = Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: members.map((member) {
+                final mins = minutesByMember[member.id] ?? 0;
+                final pct = totalMinutes > 0
+                    ? ((mins / totalMinutes) * 100).round()
+                    : 0;
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            width: 14,
+                            height: 14,
+                            decoration: BoxDecoration(
+                              color: member.color,
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                  color: CasviumColors.ink, width: 1.5),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 2,
+                              alignment: WrapAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  member.name,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: 13.5,
+                                    color: CasviumColors.ink,
+                                    fontFamily: 'Segoe UI',
+                                  ),
+                                ),
+                                Text(
+                                  '$mins min ($pct%)',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 12.5,
+                                    color: CasviumColors.inkMuted,
+                                    fontFamily: 'Segoe UI',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(99),
+                        child: Container(
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: CasviumColors.surfaceAlt,
+                            borderRadius: BorderRadius.circular(99),
+                          ),
+                          alignment: Alignment.centerLeft,
+                          child: FractionallySizedBox(
+                            widthFactor: totalMinutes > 0
+                                ? (mins / totalMinutes) * progress
+                                : 0,
+                            child: Container(
                               decoration: BoxDecoration(
                                 color: member.color,
-                                shape: BoxShape.circle,
-                                border: Border.all(
-                                    color: CasviumColors.ink, width: 1.5),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                member.name,
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 13.5,
-                                  color: CasviumColors.ink,
-                                  fontFamily: 'Segoe UI',
-                                ),
-                              ),
-                            ),
-                            Text(
-                              '$mins min ($pct%)',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                                fontSize: 12.5,
-                                color: CasviumColors.inkMuted,
-                                fontFamily: 'Segoe UI',
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(99),
-                          child: Container(
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: CasviumColors.surfaceAlt,
-                              borderRadius: BorderRadius.circular(99),
-                            ),
-                            alignment: Alignment.centerLeft,
-                            child: FractionallySizedBox(
-                              widthFactor: totalMinutes > 0
-                                  ? (mins / totalMinutes) * progress
-                                  : 0,
-                              child: Container(
-                                decoration: BoxDecoration(
-                                  color: member.color,
-                                  borderRadius: BorderRadius.circular(99),
-                                ),
+                                borderRadius: BorderRadius.circular(99),
                               ),
                             ),
                           ),
                         ),
-                      ],
-                    ),
-                  );
-                }).toList(),
-              ),
-            ),
-          ],
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            );
+
+            return Flex(
+              direction: stack ? Axis.vertical : Axis.horizontal,
+              children: [
+                chart,
+                const SizedBox(width: 18, height: 12),
+                if (stack) legend else Expanded(child: legend),
+              ],
+            );
+          },
         );
       },
     );
@@ -245,8 +259,8 @@ class WeeklyPulseWaveChart extends StatelessWidget {
     const weekdayShort = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
     for (int i = 6; i >= 0; i--) {
-      final day = DateTime(now.year, now.month, now.day)
-          .subtract(Duration(days: i));
+      final day =
+          DateTime(now.year, now.month, now.day).subtract(Duration(days: i));
       labels.add(weekdayShort[day.weekday - 1]);
       final mins = sessions.where((s) {
         return s.performedAt.year == day.year &&
@@ -275,47 +289,50 @@ class WeeklyPulseWaveChart extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: List.generate(7, (index) {
                 final isToday = index == 6;
-                return Column(
-                  children: [
-                    Text(
-                      '${dailyMinutes[index]}m',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        color: isToday
-                            ? CasviumColors.terracotta
-                            : CasviumColors.ink,
-                        fontFamily: 'Segoe UI',
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 7,
-                        vertical: 2,
-                      ),
-                      decoration: BoxDecoration(
-                        color: isToday
-                            ? CasviumColors.terracotta
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(
-                        labels[index],
+                return Expanded(
+                  child: Column(
+                    children: [
+                      Text(
+                        '${dailyMinutes[index]}m',
+                        textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 11,
-                          fontWeight: FontWeight.w700,
+                          fontWeight: FontWeight.w800,
                           color: isToday
-                              ? CasviumColors.surface
-                              : CasviumColors.inkMuted,
+                              ? CasviumColors.terracotta
+                              : CasviumColors.ink,
                           fontFamily: 'Segoe UI',
                         ),
                       ),
-                    ),
-                  ],
+                      const SizedBox(height: 2),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 3,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isToday
+                              ? CasviumColors.terracotta
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          labels[index],
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: isToday
+                                ? CasviumColors.surface
+                                : CasviumColors.inkMuted,
+                            fontFamily: 'Segoe UI',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 );
               }),
             ),
@@ -351,8 +368,9 @@ class _WeeklySplinePainter extends CustomPainter {
     }
 
     final points = <Offset>[];
+    final dayWidth = w / values.length;
     for (int i = 0; i < values.length; i++) {
-      final x = (w / (values.length - 1)) * i;
+      final x = dayWidth * (i + 0.5);
       final normalized = (values[i] / maxVal) * progress;
       final y = h - 18 - (normalized * (h - 36));
       points.add(Offset(x, y));
@@ -392,8 +410,7 @@ class _WeeklySplinePainter extends CustomPainter {
     );
 
     for (final pt in points) {
-      canvas.drawCircle(
-          pt, 5.5, Paint()..color = CasviumColors.terracotta);
+      canvas.drawCircle(pt, 5.5, Paint()..color = CasviumColors.terracotta);
       canvas.drawCircle(
         pt,
         5.5,
@@ -466,28 +483,33 @@ class RoomEffortInfographic extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          room.name,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 13.5,
-                            color: CasviumColors.ink,
-                            fontFamily: 'Segoe UI',
+                    SizedBox(
+                      width: double.infinity,
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 2,
+                        alignment: WrapAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            room.name,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 13.5,
+                              color: CasviumColors.ink,
+                              fontFamily: 'Segoe UI',
+                            ),
                           ),
-                        ),
-                        Text(
-                          '$mins min · $taskCount tareas',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontSize: 12,
-                            color: CasviumColors.inkMuted,
-                            fontFamily: 'Segoe UI',
+                          Text(
+                            '$mins min · $taskCount tareas',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 12,
+                              color: CasviumColors.inkMuted,
+                              fontFamily: 'Segoe UI',
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 5),
                     Container(

@@ -1,6 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../theme/casvium_theme.dart';
 import '../data/chore_icons.dart';
+
+VoidCallback withTapHaptics(VoidCallback onTap) {
+  return () {
+    HapticFeedback.lightImpact();
+    onTap();
+  };
+}
 
 /// Tarjeta táctil Neo-Bento con borde de tinta y sombra desplazada sólida
 /// que reacciona físicamente al pulsarla (sin aspecto genérico de Material Card).
@@ -32,15 +40,12 @@ class _CasviumBentoCardState extends State<CasviumBentoCard> {
     final offset = _pressed ? 1.0 : widget.shadowOffset;
     final translate = _pressed ? widget.shadowOffset - 1.0 : 0.0;
 
+    final onTap = widget.onTap;
     return GestureDetector(
-      onTapDown: widget.onTap != null ? (_) => setState(() => _pressed = true) : null,
-      onTapUp: widget.onTap != null
-          ? (_) {
-              setState(() => _pressed = false);
-              widget.onTap?.call();
-            }
-          : null,
-      onTapCancel: widget.onTap != null ? () => setState(() => _pressed = false) : null,
+      onTap: onTap == null ? null : withTapHaptics(onTap),
+      onTapDown: onTap == null ? null : (_) => setState(() => _pressed = true),
+      onTapUp: onTap == null ? null : (_) => setState(() => _pressed = false),
+      onTapCancel: onTap == null ? null : () => setState(() => _pressed = false),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 110),
         transform: Matrix4.translationValues(translate, translate, 0),
@@ -102,13 +107,15 @@ class CasviumActionPill extends StatelessWidget {
             Icon(icon, size: compact ? 16 : 18, color: textColor),
             const SizedBox(width: 6),
           ],
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: compact ? 12.5 : 14,
-              fontWeight: FontWeight.w800,
-              color: textColor,
-              fontFamily: 'Segoe UI',
+          Flexible(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: compact ? 12.5 : 14,
+                fontWeight: FontWeight.w800,
+                color: textColor,
+                fontFamily: 'Segoe UI',
+              ),
             ),
           ),
         ],
@@ -142,11 +149,12 @@ class CasviumFloatingDock extends StatelessWidget {
       margin: const EdgeInsets.fromLTRB(14, 0, 14, 14),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
-        color: CasviumColors.ink,
+        color: CasviumColors.surface,
         borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: CasviumColors.surfaceAlt),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x40000000),
+            color: Color(0x261E1C1A),
             offset: Offset(0, 8),
             blurRadius: 16,
           ),
@@ -157,8 +165,11 @@ class CasviumFloatingDock extends StatelessWidget {
         children: List.generate(_items.length, (index) {
           final item = _items[index];
           final selected = index == currentIndex;
-          return GestureDetector(
-            onTap: () => onChanged(index),
+          final tab = GestureDetector(
+            onTap: () {
+              HapticFeedback.selectionClick();
+              onChanged(index);
+            },
             behavior: HitTestBehavior.opaque,
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 220),
@@ -168,21 +179,24 @@ class CasviumFloatingDock extends StatelessWidget {
                 vertical: 7,
               ),
               decoration: BoxDecoration(
-                color: selected ? CasviumColors.surface : Colors.transparent,
+                color:
+                    selected ? CasviumColors.surfaceAlt : Colors.transparent,
                 borderRadius: BorderRadius.circular(20),
               ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
+              child: OverflowBar(
+                spacing: 6,
+                overflowSpacing: 3,
+                overflowAlignment: OverflowBarAlignment.center,
                 children: [
                   ChoreCustomIcon(
                     iconKey: item.iconKey,
                     size: 26,
                     showBadgeBorder: selected,
                   ),
-                  if (selected) ...[
-                    const SizedBox(width: 6),
+                  if (selected)
                     Text(
                       item.label,
+                      textAlign: TextAlign.center,
                       style: const TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w900,
@@ -190,11 +204,11 @@ class CasviumFloatingDock extends StatelessWidget {
                         fontFamily: 'Segoe UI',
                       ),
                     ),
-                  ],
                 ],
               ),
             ),
           );
+          return Flexible(flex: selected ? 1 : 0, child: tab);
         }),
       ),
     );
@@ -228,17 +242,19 @@ class DurationCustomSelector extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Text(
-                'DURACIÓN ESTIMADA',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.7,
-                  color: CasviumColors.inkMuted,
-                  fontFamily: 'Segoe UI',
+              const Expanded(
+                child: Text(
+                  'DURACIÓN ESTIMADA',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.7,
+                    color: CasviumColors.inkMuted,
+                    fontFamily: 'Segoe UI',
+                  ),
                 ),
               ),
-              const Spacer(),
+              const SizedBox(width: 8),
               Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -281,7 +297,10 @@ class DurationCustomSelector extends StatelessWidget {
             children: _presets.map((preset) {
               final active = preset == minutes;
               return GestureDetector(
-                onTap: () => onChanged(preset),
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  onChanged(preset);
+                },
                 child: Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 10, vertical: 5),

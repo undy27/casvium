@@ -1,5 +1,7 @@
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
+import 'local_household_storage.dart';
 import 'pg_connector_stub.dart'
     if (dart.library.io) 'pg_connector_io.dart';
 
@@ -29,18 +31,76 @@ class CasviumStore extends ChangeNotifier {
 
   String activeLoggedUser = 'Lucía';
 
-  CasviumStore() {
+  List<Room> get currentRooms =>
+      rooms.where((room) => room.householdId == currentHousehold.id).toList();
+
+  List<ChoreTask> get currentTasks =>
+      tasks.where((task) => task.householdId == currentHousehold.id).toList();
+
+  List<WorkSession> get currentSessions => sessions
+      .where((session) => session.householdId == currentHousehold.id)
+      .toList();
+
+  static const _snapshotKey = 'casvium.household.v1';
+  final SharedPreferences? _preferences;
+  Future<void> _pendingSave = Future.value();
+
+  CasviumStore({SharedPreferences? preferences}) : _preferences = preferences {
+    try {
+      final saved = preferences?.getString(_snapshotKey);
+      if (saved != null) {
+        final snapshot = HouseholdSnapshot.decode(saved);
+        currentHousehold = snapshot.household;
+        households.addAll(snapshot.households);
+        members.addAll(snapshot.members);
+        rooms.addAll(snapshot.rooms);
+        tasks.addAll(snapshot.tasks);
+        sessions.addAll(snapshot.sessions);
+        activeLoggedUser = snapshot.activeLoggedUser;
+        return;
+      }
+    } on FormatException {
+      debugPrint('No se pudo leer el hogar guardado.');
+    } on TypeError {
+      debugPrint('Formato de hogar guardado incompatible.');
+    }
     _seedInitialHousehold();
   }
 
+  void _saveChanges() {
+    final preferences = _preferences;
+    if (preferences != null) {
+      final data = HouseholdSnapshot(
+        household: currentHousehold,
+        households: households,
+        members: members,
+        rooms: rooms,
+        tasks: tasks,
+        sessions: sessions,
+        activeLoggedUser: activeLoggedUser,
+      ).encode();
+      _pendingSave = _pendingSave.then((_) async {
+        try {
+          if (!await preferences.setString(_snapshotKey, data)) {
+            debugPrint('No se pudo guardar el hogar en este dispositivo.');
+          }
+        } catch (error) {
+          debugPrint('No se pudo guardar el hogar: $error');
+        }
+      });
+    }
+    notifyListeners();
+  }
+
   void _seedInitialHousehold() {
+    final now = DateTime.now();
     const hId = 'home-villa-olivo';
     currentHousehold = Household(
       id: hId,
       name: 'Casa Los Olivos 4B',
       inviteCode: 'CASV-842',
       mascotName: 'Don Mocho',
-      createdAt: DateTime.now().subtract(const Duration(days: 30)),
+      createdAt: now.subtract(const Duration(days: 30)),
     );
     households.add(currentHousehold);
 
@@ -133,7 +193,7 @@ class CasviumStore extends ChangeNotifier {
     ]);
 
     // Tareas de ejemplo frecuentes (asociadas a una o varias estancias)
-    tasks.addAll(const [
+    tasks.addAll([
       ChoreTask(
         id: 'task-1',
         householdId: hId,
@@ -144,7 +204,8 @@ class CasviumStore extends ChangeNotifier {
         roomIds: ['room-cocina', 'room-bano', 'room-salon', 'room-recibidor'],
         estimatedMinutes: 25,
         isShared: true,
-        frequencyLabel: '2 veces/sem',
+        frequency: TaskFrequency.twiceWeekly,
+        createdAt: currentHousehold.createdAt,
         intensity: 2,
       ),
       ChoreTask(
@@ -157,7 +218,8 @@ class CasviumStore extends ChangeNotifier {
         roomIds: ['room-cocina'],
         estimatedMinutes: 12,
         isShared: true,
-        frequencyLabel: 'Diaria',
+        frequency: TaskFrequency.daily,
+        createdAt: currentHousehold.createdAt,
         intensity: 1,
       ),
       ChoreTask(
@@ -169,7 +231,8 @@ class CasviumStore extends ChangeNotifier {
         roomIds: ['room-bano'],
         estimatedMinutes: 20,
         isShared: true,
-        frequencyLabel: 'Semanal',
+        frequency: TaskFrequency.weekly,
+        createdAt: currentHousehold.createdAt,
         intensity: 3,
       ),
       ChoreTask(
@@ -181,7 +244,8 @@ class CasviumStore extends ChangeNotifier {
         roomIds: ['room-salon', 'room-dormitorio', 'room-recibidor'],
         estimatedMinutes: 20,
         isShared: true,
-        frequencyLabel: 'Semanal',
+        frequency: TaskFrequency.weekly,
+        createdAt: currentHousehold.createdAt,
         intensity: 2,
       ),
       ChoreTask(
@@ -193,7 +257,8 @@ class CasviumStore extends ChangeNotifier {
         roomIds: ['room-lavadero', 'room-terraza'],
         estimatedMinutes: 18,
         isShared: true,
-        frequencyLabel: '3 veces/sem',
+        frequency: TaskFrequency.threeTimesWeekly,
+        createdAt: currentHousehold.createdAt,
         intensity: 1,
       ),
       ChoreTask(
@@ -205,7 +270,8 @@ class CasviumStore extends ChangeNotifier {
         roomIds: ['room-dormitorio'],
         estimatedMinutes: 15,
         isShared: false,
-        frequencyLabel: 'Semanal',
+        frequency: TaskFrequency.weekly,
+        createdAt: currentHousehold.createdAt,
         intensity: 2,
       ),
       ChoreTask(
@@ -217,7 +283,8 @@ class CasviumStore extends ChangeNotifier {
         roomIds: ['room-cocina'],
         estimatedMinutes: 15,
         isShared: true,
-        frequencyLabel: 'Diaria',
+        frequency: TaskFrequency.daily,
+        createdAt: currentHousehold.createdAt,
         intensity: 2,
       ),
       ChoreTask(
@@ -229,7 +296,8 @@ class CasviumStore extends ChangeNotifier {
         roomIds: ['room-cocina', 'room-recibidor'],
         estimatedMinutes: 10,
         isShared: true,
-        frequencyLabel: 'Diaria',
+        frequency: TaskFrequency.daily,
+        createdAt: currentHousehold.createdAt,
         intensity: 1,
       ),
       ChoreTask(
@@ -241,13 +309,13 @@ class CasviumStore extends ChangeNotifier {
         roomIds: ['room-terraza', 'room-salon'],
         estimatedMinutes: 15,
         isShared: false,
-        frequencyLabel: '2 veces/sem',
+        frequency: TaskFrequency.twiceWeekly,
+        createdAt: currentHousehold.createdAt,
         intensity: 1,
       ),
     ]);
 
     // Sesiones de trabajo de ejemplo en los últimos 7 días
-    final now = DateTime.now();
     sessions.addAll([
       WorkSession(
         id: 'sess-1',
@@ -345,7 +413,11 @@ class CasviumStore extends ChangeNotifier {
       name: name,
       mascotName: mascotName,
     );
-    notifyListeners();
+    final index = households.indexWhere(
+      (household) => household.id == currentHousehold.id,
+    );
+    households[index] = currentHousehold;
+    _saveChanges();
   }
 
   void createNewHousehold({
@@ -389,12 +461,12 @@ class CasviumStore extends ChangeNotifier {
     if (members.isNotEmpty) {
       activeLoggedUser = members.first.name;
     }
-    notifyListeners();
+    _saveChanges();
   }
 
   void setActiveLoggedUser(String userName) {
     activeLoggedUser = userName;
-    notifyListeners();
+    _saveChanges();
   }
 
   void addMember({
@@ -411,7 +483,7 @@ class CasviumStore extends ChangeNotifier {
       streakDays: 1,
     );
     members.add(member);
-    notifyListeners();
+    _saveChanges();
   }
 
   void addRoom({
@@ -428,7 +500,7 @@ class CasviumStore extends ChangeNotifier {
       isDefault: false,
     );
     rooms.add(room);
-    notifyListeners();
+    _saveChanges();
   }
 
   void addChoreTask({
@@ -438,11 +510,12 @@ class CasviumStore extends ChangeNotifier {
     required List<String> roomIds,
     required int estimatedMinutes,
     required bool isShared,
-    required String frequencyLabel,
+    required TaskFrequency frequency,
     required int intensity,
   }) {
+    final now = DateTime.now();
     final task = ChoreTask(
-      id: 'task-${DateTime.now().millisecondsSinceEpoch}',
+      id: 'task-${now.microsecondsSinceEpoch}',
       householdId: currentHousehold.id,
       title: title,
       description: description,
@@ -450,11 +523,49 @@ class CasviumStore extends ChangeNotifier {
       roomIds: roomIds,
       estimatedMinutes: estimatedMinutes,
       isShared: isShared,
-      frequencyLabel: frequencyLabel,
+      frequency: frequency,
+      createdAt: now,
       intensity: intensity,
     );
     tasks.insert(0, task);
-    notifyListeners();
+    _saveChanges();
+  }
+
+  void updateChoreTaskFrequency(String taskId, TaskFrequency frequency) {
+    final index = tasks.indexWhere(
+      (task) => task.id == taskId && task.householdId == currentHousehold.id,
+    );
+    if (index == -1 || tasks[index].frequency == frequency) return;
+    tasks[index] = tasks[index].copyWith(frequency: frequency);
+    _saveChanges();
+  }
+
+  Map<String, TaskDeadline> taskDeadlines({required DateTime now}) {
+    final local = now.toLocal();
+    final today = DateTime(local.year, local.month, local.day);
+    final latestSessions = <String, DateTime>{};
+    for (final session in currentSessions) {
+      if (session.performedAt.isAfter(now)) continue;
+      final previous = latestSessions[session.taskId];
+      if (previous == null || session.performedAt.isAfter(previous)) {
+        latestSessions[session.taskId] = session.performedAt;
+      }
+    }
+
+    final deadlines = <String, TaskDeadline>{};
+    for (final task in currentTasks) {
+      final date = task.frequency.nextAfter(
+        latestSessions[task.id] ?? task.createdAt,
+      );
+      if (date == null) continue;
+      final status = switch (date.compareTo(today)) {
+        < 0 => TaskDeadlineStatus.overdue,
+        0 => TaskDeadlineStatus.today,
+        _ => TaskDeadlineStatus.upcoming,
+      };
+      deadlines[task.id] = TaskDeadline(task: task, date: date, status: status);
+    }
+    return deadlines;
   }
 
   void logWorkSession({
@@ -482,7 +593,7 @@ class CasviumStore extends ChangeNotifier {
       notes: notes,
     );
     sessions.insert(0, session);
-    notifyListeners();
+    _saveChanges();
   }
 
   Room? roomById(String? id) {
@@ -525,9 +636,9 @@ class CasviumStore extends ChangeNotifier {
         connectionUrl: railwayDatabaseUrl,
         household: currentHousehold,
         members: members,
-        rooms: rooms,
-        tasks: tasks,
-        sessions: sessions,
+        rooms: currentRooms,
+        tasks: currentTasks,
+        sessions: currentSessions,
       );
       isConnectedToRailway = true;
     } catch (e) {

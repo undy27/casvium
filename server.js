@@ -49,8 +49,11 @@ async function ensureSchema() {
         icon_key TEXT NOT NULL,
         estimated_minutes INT NOT NULL,
         is_shared BOOLEAN NOT NULL DEFAULT TRUE,
-        frequency_label TEXT NOT NULL
+        frequency_label TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+      ALTER TABLE chore_tasks
+        ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
       CREATE TABLE IF NOT EXISTS task_rooms (
         task_id TEXT NOT NULL REFERENCES chore_tasks(id) ON DELETE CASCADE,
         room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
@@ -140,10 +143,14 @@ const server = http.createServer(async (req, res) => {
         }
         for (const t of data.tasks || []) {
           await client.query(
-            `INSERT INTO chore_tasks (id, household_id, title, description, icon_key, estimated_minutes, is_shared, frequency_label)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, estimated_minutes = EXCLUDED.estimated_minutes, is_shared = EXCLUDED.is_shared`,
-            [t.id, t.householdId, t.title, t.description, t.iconKey, t.estimatedMinutes, t.isShared, t.frequencyLabel]
+            `INSERT INTO chore_tasks (id, household_id, title, description, icon_key, estimated_minutes, is_shared, frequency_label, created_at)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::timestamptz, NOW()))
+             ON CONFLICT (id) DO UPDATE SET
+               title = EXCLUDED.title,
+               estimated_minutes = EXCLUDED.estimated_minutes,
+               is_shared = EXCLUDED.is_shared,
+               frequency_label = EXCLUDED.frequency_label`,
+            [t.id, t.householdId, t.title, t.description, t.iconKey, t.estimatedMinutes, t.isShared, t.frequencyLabel, t.createdAt ?? null]
           );
           for (const rId of t.roomIds || []) {
             await client.query(

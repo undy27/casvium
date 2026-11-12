@@ -76,21 +76,19 @@ class _FregonaMascotWidgetState extends State<FregonaMascotWidget>
         animation: Listenable.merge([_idleController, _bounceController]),
         builder: (context, _) {
           final t = _idleController.value;
-          final jump = math.sin(_bounceController.value * math.pi) * -12.0;
+          final jumpFraction = math.sin(_bounceController.value * math.pi);
 
           return Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Transform.translate(
-                offset: Offset(0, jump),
-                child: SizedBox(
-                  width: widget.size,
-                  height: widget.size,
-                  child: CustomPaint(
-                    painter: _HumanizedMopPainter(
-                      phase: t * 2 * math.pi,
-                      mood: _isExcited ? MascotMood.celebrating : widget.mood,
-                    ),
+              SizedBox(
+                width: widget.size,
+                height: widget.size * _HumanizedMopPainter.heightFactor,
+                child: CustomPaint(
+                  painter: _HumanizedMopPainter(
+                    phase: t * 2 * math.pi,
+                    mood: _isExcited ? MascotMood.celebrating : widget.mood,
+                    jumpFraction: jumpFraction,
                   ),
                 ),
               ),
@@ -99,7 +97,10 @@ class _FregonaMascotWidgetState extends State<FregonaMascotWidget>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -125,7 +126,6 @@ class _FregonaMascotWidgetState extends State<FregonaMascotWidget>
                             ),
                           ),
                         ),
-                        const SizedBox(width: 6),
                         const Text(
                           'Tócame ✨',
                           style: TextStyle(
@@ -182,19 +182,26 @@ class _FregonaMascotWidgetState extends State<FregonaMascotWidget>
 }
 
 class _HumanizedMopPainter extends CustomPainter {
+  static const heightFactor = 1.24;
+
   final double phase;
   final MascotMood mood;
+  final double jumpFraction;
 
   const _HumanizedMopPainter({
     required this.phase,
     required this.mood,
+    required this.jumpFraction,
   });
 
   @override
   void paint(Canvas canvas, Size size) {
     final w = size.width;
-    final h = size.height;
+    final h = size.height / heightFactor;
+    final headroom = size.height - h;
+    final floorY = h * 0.91;
     final cx = w * 0.50;
+    const bodyScale = 0.9;
 
     final sway = math.sin(phase) * (mood == MascotMood.scrubbing ? 9.0 : 4.5);
     final bob = math.cos(phase * 2) * 2.5;
@@ -207,14 +214,19 @@ class _HumanizedMopPainter extends CustomPainter {
       ..strokeJoin = StrokeJoin.round;
 
     // 1. Sombra en el suelo
+    final shadowScale = 1.0 + jumpFraction * 0.12;
+    final shadowOpacity = 0.16 - jumpFraction * 0.06;
     canvas.drawOval(
       Rect.fromCenter(
-        center: Offset(cx + sway * 0.4, h * 0.91),
-        width: w * 0.56,
-        height: h * 0.09,
+        center: Offset(cx + sway * 0.4, headroom + floorY),
+        width: w * 0.56 * shadowScale,
+        height: h * 0.09 * shadowScale,
       ),
-      Paint()..color = CasviumColors.ink.withOpacity(0.16),
+      Paint()..color = CasviumColors.ink.withOpacity(shadowOpacity),
     );
+
+    canvas.save();
+    canvas.translate(0, headroom - 12.0 * jumpFraction);
 
     // 2. Palo de madera de la fregona (tronco y piernas bailarinas)
     final stickPaint = Paint()
@@ -222,8 +234,9 @@ class _HumanizedMopPainter extends CustomPainter {
       ..style = PaintingStyle.fill;
 
     canvas.save();
-    canvas.translate(cx + sway * 0.3, h * 0.58 + bob);
+    canvas.translate(cx + sway * 0.3, floorY - h * 0.33 * bodyScale + bob);
     canvas.rotate(math.sin(phase) * 0.07);
+    canvas.scale(bodyScale);
 
     final stickRect = RRect.fromRectAndRadius(
       Rect.fromCenter(
@@ -318,7 +331,7 @@ class _HumanizedMopPainter extends CustomPainter {
       canvas.drawPath(strandPath, strandPaint);
     }
 
-    // 5. Casquete superior turquesa/cobalto ("sombrero" rosca de la fregona)
+    // 5. Casquete roscado y mango de madera
     final capRect = RRect.fromRectAndRadius(
       Rect.fromCenter(
         center: Offset(0, -h * 0.25),
@@ -327,6 +340,20 @@ class _HumanizedMopPainter extends CustomPainter {
       ),
       const Radius.circular(14),
     );
+    final handleHalfWidth = w * 0.035 / bodyScale;
+    final handleLength = h * 0.405 / bodyScale;
+    final handleRect = RRect.fromRectAndRadius(
+      Rect.fromLTRB(
+        -handleHalfWidth,
+        capRect.top - handleLength,
+        handleHalfWidth,
+        capRect.top + h * 0.035,
+      ),
+      Radius.circular(handleHalfWidth),
+    );
+    canvas.drawRRect(handleRect, stickPaint);
+    canvas.drawRRect(handleRect, outline);
+
     canvas.drawRRect(capRect, Paint()..color = CasviumColors.cobalt);
     canvas.drawRRect(capRect, outline);
 
@@ -420,9 +447,13 @@ class _HumanizedMopPainter extends CustomPainter {
           ..strokeWidth = 1.4,
       );
     }
+
+    canvas.restore();
   }
 
   @override
   bool shouldRepaint(covariant _HumanizedMopPainter oldDelegate) =>
-      oldDelegate.phase != phase || oldDelegate.mood != mood;
+      oldDelegate.phase != phase ||
+      oldDelegate.mood != mood ||
+      oldDelegate.jumpFraction != jumpFraction;
 }

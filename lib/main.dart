@@ -1,11 +1,18 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/casvium_home_shell.dart';
 import 'services/railway_postgres_service.dart';
 import 'theme/casvium_theme.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final store = CasviumStore();
+  SharedPreferences? preferences;
+  try {
+    preferences = await SharedPreferences.getInstance();
+  } catch (error) {
+    debugPrint('No se pudo abrir el almacenamiento local: $error');
+  }
+  final store = CasviumStore(preferences: preferences);
   runApp(CasviumApp(store: store));
 }
 

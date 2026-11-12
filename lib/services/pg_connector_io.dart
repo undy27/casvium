@@ -70,8 +70,14 @@ Future<String> syncHouseholdToPostgresImpl({
         icon_key TEXT NOT NULL,
         estimated_minutes INT NOT NULL,
         is_shared BOOLEAN NOT NULL DEFAULT TRUE,
-        frequency_label TEXT NOT NULL
+        frequency_label TEXT NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
       );
+    ''');
+
+    await conn.execute('''
+      ALTER TABLE chore_tasks
+        ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
     ''');
 
     await conn.execute('''
@@ -159,12 +165,13 @@ Future<String> syncHouseholdToPostgresImpl({
     for (final t in tasks) {
       await conn.execute(
         Sql.named('''
-          INSERT INTO chore_tasks (id, household_id, title, description, icon_key, estimated_minutes, is_shared, frequency_label)
-          VALUES (@id, @hid, @title, @desc, @icon, @mins, @shared, @freq)
+          INSERT INTO chore_tasks (id, household_id, title, description, icon_key, estimated_minutes, is_shared, frequency_label, created_at)
+          VALUES (@id, @hid, @title, @desc, @icon, @mins, @shared, @freq, @created)
           ON CONFLICT (id) DO UPDATE SET
             title = EXCLUDED.title,
             estimated_minutes = EXCLUDED.estimated_minutes,
-            is_shared = EXCLUDED.is_shared;
+            is_shared = EXCLUDED.is_shared,
+            frequency_label = EXCLUDED.frequency_label;
         '''),
         parameters: {
           'id': t.id,
@@ -174,7 +181,8 @@ Future<String> syncHouseholdToPostgresImpl({
           'icon': t.iconKey,
           'mins': t.estimatedMinutes,
           'shared': t.isShared,
-          'freq': t.frequencyLabel,
+          'freq': t.frequency.storageLabel,
+          'created': t.createdAt.toUtc(),
         },
       );
 

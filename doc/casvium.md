@@ -188,36 +188,36 @@ Implementados en [`lib/data/chore_icons.dart`](../lib/data/chore_icons.dart) med
 
 | # | Clave (`iconKey`) | Etiqueta | Categoría |
 | :--- | :--- | :--- | :--- |
-| 1 | `mop_bucket` | Fregar suelos | Suelos |
-| 2 | `vacuum` | Aspirar | Suelos |
-| 3 | `broom_dustpan` | Barrer y recoger | Suelos |
-| 4 | `dust_feather` | Quitar el polvo | Superficies |
-| 5 | `window_spray` | Cristales y espejos | Superficies |
-| 6 | `rug_beater` | Sacudir alfombras | Suelos |
-| 7 | `dishes_sponge` | Fregar platos | Cocina |
+| 1 | `mop_bucket` | Cubo y fregona | Suelos |
+| 2 | `vacuum` | Aspiradora | Suelos |
+| 3 | `broom_dustpan` | Escoba | Suelos |
+| 4 | `dust_feather` | Plumero | Superficies |
+| 5 | `window_spray` | Pulverizador | Superficies |
+| 6 | `rug_beater` | Alfombra | Suelos |
+| 7 | `dishes_sponge` | Plato | Cocina |
 | 8 | `dishwasher` | Lavavajillas | Cocina |
-| 9 | `stove_flame` | Limpiar fogones/vitro | Cocina |
-| 10 | `oven_sparkle` | Desengrasar horno | Cocina |
-| 11 | `fridge_clean` | Ordenar nevera | Cocina |
-| 12 | `cooking_pot` | Cocinar / Batch cooking | Cocina |
-| 13 | `grocery_bag` | Compra semanal | Cocina |
-| 14 | `pantry_jars` | Despensa y tarros | Cocina |
-| 15 | `washing_machine` | Poner lavadora | Colada |
-| 16 | `clothesline` | Tender la ropa | Colada |
-| 17 | `steam_iron` | Planchar ropa | Colada |
-| 18 | `folded_shirts` | Doblar y guardar | Colada |
-| 19 | `shoe_rack` | Limpiar calzado | Colada |
-| 20 | `toilet_brush` | Desinfectar WC | Baño |
-| 21 | `shower_head` | Ducha y mampara | Baño |
-| 22 | `sink_faucet` | Lavabo y grifería | Baño |
-| 23 | `towels_stack` | Cambiar toallas | Baño |
-| 24 | `bed_pillow` | Hacer la cama | Dormitorio |
-| 25 | `fresh_sheets` | Cambiar sábanas | Dormitorio |
-| 26 | `wardrobe_hanger` | Ordenar armario | Dormitorio |
-| 27 | `trash_bin` | Sacar la basura | Hogar |
-| 28 | `recycle_loop` | Reciclaje y vidrio | Hogar |
-| 29 | `watering_can` | Regar plantas | Exterior |
-| 30 | `pet_care` | Cuidar mascota | Hogar |
+| 9 | `stove_flame` | Fogón | Cocina |
+| 10 | `oven_sparkle` | Horno | Cocina |
+| 11 | `fridge_clean` | Nevera | Cocina |
+| 12 | `cooking_pot` | Olla | Cocina |
+| 13 | `grocery_bag` | Bolsa de compra | Cocina |
+| 14 | `pantry_jars` | Tarro | Cocina |
+| 15 | `washing_machine` | Lavadora | Colada |
+| 16 | `clothesline` | Camiseta tendida | Colada |
+| 17 | `steam_iron` | Plancha | Colada |
+| 18 | `folded_shirts` | Ropa doblada | Colada |
+| 19 | `shoe_rack` | Bota | Colada |
+| 20 | `toilet_brush` | Inodoro | Baño |
+| 21 | `shower_head` | Ducha | Baño |
+| 22 | `sink_faucet` | Lavabo | Baño |
+| 23 | `towels_stack` | Toalla | Baño |
+| 24 | `bed_pillow` | Cama | Dormitorio |
+| 25 | `fresh_sheets` | Sábana | Dormitorio |
+| 26 | `wardrobe_hanger` | Percha | Dormitorio |
+| 27 | `trash_bin` | Cubo de basura | Hogar |
+| 28 | `recycle_loop` | Símbolo de reciclaje | Hogar |
+| 29 | `watering_can` | Regadera | Exterior |
+| 30 | `pet_care` | Huella | Hogar |
 
 ---
 

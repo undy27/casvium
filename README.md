@@ -9,6 +9,7 @@ Aplicación Flutter con diseño **Neo-Bento Artesanal** (sin aspecto genérico d
    - Estancias por defecto (*Cocina, Baño Principal, Salón-Comedor, Dormitorio, Lavadero y Colada, Terraza y Plantas, Recibidor*) y creación de nuevas estancias.
 2. **Tareas Domésticas Multi-Estancia y Compartidas**:
    - Cada tarea puede asociarse a **una o varias estancias**, definir su **duración estimada** mediante un selector táctil personalizado, y marcarse como **compartida** o individual.
+   - Permite elegir y editar la periodicidad de cada tarea. El calendario de **Infografías** muestra los vencimientos y **Hogar** avisa de las tareas para hoy y las atrasadas.
    - Incluye 9 tareas frecuentes precargadas listas para usar.
 3. **30 Iconos Vectoriales Personalizados (`CustomPainter`)**:
    - Catálogo propio de 30 ilustraciones vectoriales para tareas típicas en `lib/data/chore_icons.dart`.

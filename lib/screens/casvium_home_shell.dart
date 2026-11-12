@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../data/chore_icons.dart';
 import '../models/models.dart';
@@ -21,7 +22,8 @@ class CasviumHomeShell extends StatefulWidget {
   State<CasviumHomeShell> createState() => _CasviumHomeShellState();
 }
 
-class _CasviumHomeShellState extends State<CasviumHomeShell> {
+class _CasviumHomeShellState extends State<CasviumHomeShell>
+    with WidgetsBindingObserver {
   int _selectedTab = 0;
   String? _selectedRoomFilterId;
   MascotMood _mascotMood = MascotMood.happy;
@@ -34,8 +36,39 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
   bool _isTimerRunning = false;
   String? _activeTimerTaskId;
 
+  Timer? _deadlineTimer;
+  final _reportsScrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _scheduleDeadlineRefresh();
+  }
+
+  void _scheduleDeadlineRefresh() {
+    _deadlineTimer?.cancel();
+    final now = DateTime.now();
+    final tomorrow = DateTime(now.year, now.month, now.day + 1);
+    _deadlineTimer = Timer(tomorrow.difference(now), () {
+      setState(() {});
+      _scheduleDeadlineRefresh();
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _scheduleDeadlineRefresh();
+      setState(() {});
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _deadlineTimer?.cancel();
+    _reportsScrollController.dispose();
     _liveTimer?.cancel();
     super.dispose();
   }
@@ -78,6 +111,14 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
     return ListenableBuilder(
       listenable: widget.store,
       builder: (context, _) {
+        final deadlines = widget.store.taskDeadlines(now: DateTime.now());
+        final tabs = [
+          _buildDashboardTab(context, deadlines),
+          _buildTasksTab(context, deadlines),
+          _buildWorkSessionsTab(context),
+          _buildInfographicsTab(context, deadlines.values),
+          _buildHouseholdAndRailwayTab(context),
+        ];
         return Scaffold(
           backgroundColor: CasviumColors.canvas,
           body: SafeArea(
@@ -89,11 +130,11 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
                   child: IndexedStack(
                     index: _selectedTab,
                     children: [
-                      _buildDashboardTab(context),
-                      _buildTasksAndIconsTab(context),
-                      _buildWorkSessionsTab(context),
-                      _buildInfographicsTab(context),
-                      _buildHouseholdAndRailwayTab(context),
+                      for (final (index, tab) in tabs.indexed)
+                        TickerMode(
+                          enabled: index == _selectedTab,
+                          child: tab,
+                        ),
                     ],
                   ),
                 ),
@@ -162,6 +203,7 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
           ),
           // Selector rápido de usuario activo que registra sesiones
           PopupMenuButton<String>(
+            onOpened: HapticFeedback.selectionClick,
             onSelected: store.setActiveLoggedUser,
             color: CasviumColors.surface,
             shape: RoundedRectangleBorder(
@@ -233,17 +275,32 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
   // =========================================================================
   // TAB 1: MI HOGAR (Mascota Don Mocho + Resumen Bento + Estancias + Tareas)
   // =========================================================================
-  Widget _buildDashboardTab(BuildContext context) {
+  Widget _buildDashboardTab(
+    BuildContext context,
+    Map<String, TaskDeadline> deadlines,
+  ) {
+    const memberCardShadowOffset = 3.0;
     final store = widget.store;
+    final tasks = store.currentTasks;
+    final sessions = store.currentSessions;
+    final rooms = store.currentRooms;
     final totalMinutes =
-        store.sessions.fold<int>(0, (sum, s) => sum + s.durationMinutes);
-    final sharedCount = store.tasks.where((t) => t.isShared).length;
+        sessions.fold<int>(0, (sum, s) => sum + s.durationMinutes);
+    final sharedCount = tasks.where((task) => task.isShared).length;
 
-    final filteredTasks = _selectedRoomFilterId == null
-        ? store.tasks
-        : store.tasks
-            .where((t) => t.roomIds.contains(_selectedRoomFilterId))
-            .toList();
+    final roomFilter = rooms.any((room) => room.id == _selectedRoomFilterId)
+        ? _selectedRoomFilterId
+        : null;
+    final filteredTasks = roomFilter == null
+        ? tasks
+        : tasks.where((task) => task.roomIds.contains(roomFilter));
+
+    final overdue = deadlines.values
+        .where((deadline) => deadline.status == TaskDeadlineStatus.overdue)
+        .length;
+    final dueToday = deadlines.values
+        .where((deadline) => deadline.status == TaskDeadlineStatus.today)
+        .length;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 6, 16, 30),
@@ -270,6 +327,47 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
           ),
         ),
         const SizedBox(height: 16),
+
+        if (overdue + dueToday > 0) ...[
+          CasviumBentoCard(
+            backgroundColor: const Color(0xFFFFF3D6),
+            onTap: () {
+              if (_reportsScrollController.hasClients) {
+                _reportsScrollController.jumpTo(0);
+              }
+              setState(() => _selectedTab = 3);
+            },
+            child: Row(
+              children: [
+                Icon(overdue > 0 ? Icons.warning_amber_rounded : Icons.today),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        [
+                          if (overdue > 0)
+                            overdue == 1
+                                ? '1 tarea vencida'
+                                : '$overdue tareas vencidas',
+                          if (dueToday > 0)
+                            dueToday == 1
+                                ? '1 tarea para hoy'
+                                : '$dueToday tareas para hoy',
+                        ].join(' · '),
+                        style: const TextStyle(fontWeight: FontWeight.w800),
+                      ),
+                      const Text('Ver calendario de tareas'),
+                    ],
+                  ),
+                ),
+                const Icon(Icons.chevron_right),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+        ],
 
         // 2. Tarjetas Bento de métricas rápidas
         Row(
@@ -302,7 +400,7 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
                       ),
                     ),
                     Text(
-                      '${store.sessions.length} sesiones registradas',
+                      '${sessions.length} sesiones registradas',
                       style: const TextStyle(
                         fontSize: 11.5,
                         color: CasviumColors.surface,
@@ -335,7 +433,7 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '$sharedCount de ${store.tasks.length}',
+                      '$sharedCount de ${tasks.length}',
                       style: const TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.w900,
@@ -343,7 +441,7 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
                       ),
                     ),
                     Text(
-                      '${store.rooms.length} estancias activas',
+                      '${rooms.length} estancias activas',
                       style: const TextStyle(
                         fontSize: 11.5,
                         color: CasviumColors.surface,
@@ -360,8 +458,10 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
         const SizedBox(height: 20),
 
         // 3. Miembros del hogar y racha
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        OverflowBar(
+          alignment: MainAxisAlignment.spaceBetween,
+          spacing: 8,
+          overflowSpacing: 8,
           children: [
             Text(
               'Equipo del Hogar',
@@ -378,21 +478,25 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
         ),
         const SizedBox(height: 10),
         SizedBox(
-          height: 82,
+          height: 82 + memberCardShadowOffset,
           child: ListView.separated(
             scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.only(
+              right: memberCardShadowOffset,
+              bottom: memberCardShadowOffset,
+            ),
             itemCount: store.members.length,
             separatorBuilder: (_, __) => const SizedBox(width: 10),
             itemBuilder: (context, i) {
               final m = store.members[i];
-              final memberSessions = store.sessions
+              final memberSessions = sessions
                   .where((s) =>
                       s.memberId == m.id || s.coWorkerIds.contains(m.id))
                   .length;
               return CasviumBentoCard(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                shadowOffset: 3,
+                shadowOffset: memberCardShadowOffset,
                 child: Row(
                   children: [
                     Container(
@@ -448,8 +552,10 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
         const SizedBox(height: 20),
 
         // 4. Filtro por Estancias (por defecto: cocina, baño, salón, etc.)
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        OverflowBar(
+          alignment: MainAxisAlignment.spaceBetween,
+          spacing: 8,
+          overflowSpacing: 8,
           children: [
             Text(
               'Estancias del Hogar',
@@ -467,17 +573,18 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
         const SizedBox(height: 10),
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
+          padding: const EdgeInsets.only(bottom: 2),
           child: Row(
             children: [
               _buildRoomFilterChip(
-                label: 'Todas (${store.tasks.length})',
+                label: 'Todas (${tasks.length})',
                 iconKey: 'mop_bucket',
-                selected: _selectedRoomFilterId == null,
+                selected: roomFilter == null,
                 onTap: () => setState(() => _selectedRoomFilterId = null),
               ),
               const SizedBox(width: 8),
-              ...store.rooms.map((room) {
-                final count = store.tasks
+              ...rooms.map((room) {
+                final count = tasks
                     .where((t) => t.roomIds.contains(room.id))
                     .length;
                 return Padding(
@@ -485,7 +592,7 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
                   child: _buildRoomFilterChip(
                     label: '${room.name} ($count)',
                     iconKey: room.iconKey,
-                    selected: _selectedRoomFilterId == room.id,
+                    selected: roomFilter == room.id,
                     onTap: () => setState(() {
                       _selectedRoomFilterId =
                           _selectedRoomFilterId == room.id ? null : room.id;
@@ -501,7 +608,7 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
         // 5. Lista de tareas frecuentes con ejecución rápida o registro de sesión
         ...filteredTasks.map((task) => Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: _buildChoreTaskCard(context, task),
+              child: _buildChoreTaskCard(context, task, deadlines[task.id]),
             )),
       ],
     );
@@ -514,12 +621,15 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
     required VoidCallback onTap,
   }) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: () {
+        HapticFeedback.selectionClick();
+        onTap();
+      },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: selected ? CasviumColors.ink : CasviumColors.surface,
+          color: selected ? CasviumColors.surfaceAlt : CasviumColors.surface,
           borderRadius: BorderRadius.circular(99),
           border: Border.all(color: CasviumColors.ink, width: 1.8),
           boxShadow: selected
@@ -546,7 +656,7 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
               style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w800,
-                color: selected ? CasviumColors.surface : CasviumColors.ink,
+                color: CasviumColors.ink,
                 fontFamily: 'Segoe UI',
               ),
             ),
@@ -556,7 +666,11 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
     );
   }
 
-  Widget _buildChoreTaskCard(BuildContext context, ChoreTask task) {
+  Widget _buildChoreTaskCard(
+    BuildContext context,
+    ChoreTask task,
+    TaskDeadline? deadline,
+  ) {
     final store = widget.store;
     final taskRooms = task.roomIds
         .map((id) => store.roomById(id))
@@ -582,7 +696,9 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Row(
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
                       children: [
                         Container(
                           padding: const EdgeInsets.symmetric(
@@ -609,7 +725,6 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
                             ),
                           ),
                         ),
-                        const SizedBox(width: 6),
                         Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 8,
@@ -659,6 +774,19 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
             ],
           ),
           const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(child: _buildTaskSchedule(task, deadline)),
+              IconButton(
+                tooltip: 'Editar periodicidad de ${task.title}',
+                icon: const Icon(Icons.edit_calendar_outlined),
+                onPressed: withTapHaptics(
+                  () => _openTaskFrequencyDialog(context, task),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
           // Etiquetas de una o varias estancias asociadas
           Wrap(
             spacing: 6,
@@ -685,41 +813,58 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
             }).toList(),
           ),
           const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: CasviumActionPill(
-                  label: isTimingThis
-                      ? 'Detener (${_liveSeconds ~/ 60}:${(_liveSeconds % 60).toString().padLeft(2, '0')})'
-                      : 'Cronometrar',
-                  icon: isTimingThis
-                      ? Icons.stop_circle_outlined
-                      : Icons.play_circle_outline,
-                  color: isTimingThis
-                      ? CasviumColors.coral
-                      : CasviumColors.surfaceAlt,
-                  textColor:
-                      isTimingThis ? CasviumColors.surface : CasviumColors.ink,
-                  compact: true,
-                  onPressed: () => _toggleLiveTimer(task.id),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: CasviumActionPill(
-                  label: 'Registrar Sesión',
-                  icon: Icons.check_circle_outline,
-                  color: CasviumColors.terracotta,
-                  textColor: CasviumColors.surface,
-                  compact: true,
-                  onPressed: () => _openLogSessionSheet(
-                    context,
-                    initialTask: task,
-                    initialMinutes: task.estimatedMinutes,
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const spacing = 10.0;
+              const minButtonWidth = 152.0;
+              final textScale =
+                  MediaQuery.textScalerOf(context).scale(12.5) / 12.5;
+              final halfWidth = (constraints.maxWidth - spacing) / 2;
+              final buttonWidth = halfWidth >= minButtonWidth * textScale
+                  ? halfWidth
+                  : constraints.maxWidth;
+
+              return Wrap(
+                spacing: spacing,
+                runSpacing: 8,
+                children: [
+                  SizedBox(
+                    width: buttonWidth,
+                    child: CasviumActionPill(
+                      label: isTimingThis
+                          ? 'Detener (${_liveSeconds ~/ 60}:${(_liveSeconds % 60).toString().padLeft(2, '0')})'
+                          : 'Cronometrar',
+                      icon: isTimingThis
+                          ? Icons.stop_circle_outlined
+                          : Icons.play_circle_outline,
+                      color: isTimingThis
+                          ? CasviumColors.coral
+                          : CasviumColors.surfaceAlt,
+                      textColor: isTimingThis
+                          ? CasviumColors.surface
+                          : CasviumColors.ink,
+                      compact: true,
+                      onPressed: () => _toggleLiveTimer(task.id),
+                    ),
                   ),
-                ),
-              ),
-            ],
+                  SizedBox(
+                    width: buttonWidth,
+                    child: CasviumActionPill(
+                      label: 'Registrar Sesión',
+                      icon: Icons.check_circle_outline,
+                      color: CasviumColors.terracotta,
+                      textColor: CasviumColors.surface,
+                      compact: true,
+                      onPressed: () => _openLogSessionSheet(
+                        context,
+                        initialTask: task,
+                        initialMinutes: task.estimatedMinutes,
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
           ),
         ],
       ),
@@ -727,10 +872,13 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
   }
 
   // =========================================================================
-  // TAB 2: CATÁLOGO DE TAREAS + GALERÍA DE LOS 30 ICONOS VECTORIALES
+  // TAB 2: CATÁLOGO DE TAREAS
   // =========================================================================
-  Widget _buildTasksAndIconsTab(BuildContext context) {
-    final store = widget.store;
+  Widget _buildTasksTab(
+    BuildContext context,
+    Map<String, TaskDeadline> deadlines,
+  ) {
+    final tasks = widget.store.currentTasks;
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 30),
       children: [
@@ -738,137 +886,30 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Tareas y 30 Iconos',
-                    style: Theme.of(context).textTheme.headlineMedium,
-                  ),
-                  const Text(
-                    'Crea tareas multi-estancia con duración estimada y elige entre los 30 iconos.',
-                    style: TextStyle(
-                      fontSize: 13,
-                      color: CasviumColors.inkMuted,
-                      fontFamily: 'Segoe UI',
-                    ),
-                  ),
-                ],
+              child: Text(
+                'Tareas (${tasks.length})',
+                style: Theme.of(context).textTheme.headlineMedium,
               ),
             ),
             const SizedBox(width: 8),
             CasviumActionPill(
               label: '+ Nueva Tarea',
               color: CasviumColors.terracotta,
-              onPressed: () => _openCreateTaskSheet(context),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => _CreateTaskScreen(store: widget.store),
+                  ),
+                );
+              },
             ),
           ],
         ),
         const SizedBox(height: 18),
 
-        // Galería interactiva de los 30 iconos generados para tareas típicas
-        CasviumBentoCard(
-          backgroundColor: CasviumColors.surface,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  const Text(
-                    'COLECCIÓN DE 30 ICONOS DE TAREAS TÍPICAS',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.8,
-                      color: CasviumColors.inkMuted,
-                      fontFamily: 'Segoe UI',
-                    ),
-                  ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: CasviumColors.mustard,
-                      borderRadius: BorderRadius.circular(99),
-                      border: Border.all(color: CasviumColors.ink, width: 1.3),
-                    ),
-                    child: Text(
-                      '${ChoreIconsCatalog.all.length} iconos',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w900,
-                        fontFamily: 'Segoe UI',
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              const Text(
-                'Pulsa cualquier icono para crear directamente una tarea doméstica con esa ilustración:',
-                style: TextStyle(
-                  fontSize: 12.5,
-                  color: CasviumColors.inkMuted,
-                  fontFamily: 'Segoe UI',
-                ),
-              ),
-              const SizedBox(height: 14),
-              GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                itemCount: ChoreIconsCatalog.all.length,
-                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: 5,
-                  mainAxisSpacing: 12,
-                  crossAxisSpacing: 8,
-                  childAspectRatio: 0.76,
-                ),
-                itemBuilder: (context, index) {
-                  final item = ChoreIconsCatalog.all[index];
-                  return GestureDetector(
-                    onTap: () => _openCreateTaskSheet(
-                      context,
-                      preselectedIconKey: item.key,
-                      suggestedTitle: item.label,
-                    ),
-                    child: Column(
-                      children: [
-                        ChoreCustomIcon(
-                          iconKey: item.key,
-                          size: 44,
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          item.label,
-                          maxLines: 2,
-                          textAlign: TextAlign.center,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: CasviumColors.ink,
-                            height: 1.1,
-                            fontFamily: 'Segoe UI',
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: 20),
-        Text(
-          'Catálogo Activo (${store.tasks.length} tareas)',
-          style: Theme.of(context).textTheme.headlineMedium,
-        ),
-        const SizedBox(height: 10),
-        ...store.tasks.map((t) => Padding(
+        ...tasks.map((task) => Padding(
               padding: const EdgeInsets.only(bottom: 12),
-              child: _buildChoreTaskCard(context, t),
+              child: _buildChoreTaskCard(context, task, deadlines[task.id]),
             )),
       ],
     );
@@ -916,7 +957,7 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
         ),
         const SizedBox(height: 16),
 
-        ...store.sessions.map((session) {
+        ...store.currentSessions.map((session) {
           final task = store.taskById(session.taskId);
           final member = store.memberById(session.memberId);
           final room = store.roomById(session.roomId);
@@ -1072,9 +1113,23 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
   // =========================================================================
   // TAB 4: INFOGRAFÍAS Y GRÁFICAS PERSONALIZADAS
   // =========================================================================
-  Widget _buildInfographicsTab(BuildContext context) {
+  Widget _buildInfographicsTab(
+    BuildContext context,
+    Iterable<TaskDeadline> deadlines,
+  ) {
     final store = widget.store;
+    final sessions = store.currentSessions;
+    final sortedDeadlines = deadlines.toList()
+      ..sort((a, b) => a.date.compareTo(b.date));
+    final overdue = sortedDeadlines
+        .where((deadline) => deadline.status == TaskDeadlineStatus.overdue)
+        .length;
+    final today = sortedDeadlines
+        .where((deadline) => deadline.status == TaskDeadlineStatus.today)
+        .length;
+    final upcoming = sortedDeadlines.length - overdue - today;
     return ListView(
+      controller: _reportsScrollController,
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 30),
       children: [
         Text(
@@ -1082,11 +1137,54 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
           style: Theme.of(context).textTheme.headlineMedium,
         ),
         const Text(
-          'Visualización de equidad entre miembros, esfuerzo por estancia y pulso semanal.',
+          'Calendario de tareas, reparto del trabajo y esfuerzo por estancia.',
           style: TextStyle(
             fontSize: 13,
             color: CasviumColors.inkMuted,
             fontFamily: 'Segoe UI',
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        CasviumBentoCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Calendario de tareas',
+                style: Theme.of(context).textTheme.titleLarge,
+              ),
+              const SizedBox(height: 6),
+              if (sortedDeadlines.isEmpty)
+                const Text('El hogar no tiene tareas periódicas.')
+              else ...[
+                Text(
+                  '$overdue ${overdue == 1 ? 'vencida' : 'vencidas'} · '
+                  '$today para hoy · '
+                  '$upcoming ${upcoming == 1 ? 'próxima' : 'próximas'}',
+                  style: const TextStyle(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 12),
+                for (final deadline in sortedDeadlines)
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: Text(deadline.task.title),
+                    subtitle: _buildTaskSchedule(deadline.task, deadline),
+                    trailing: IconButton(
+                      tooltip: 'Registrar sesión de ${deadline.task.title}',
+                      icon: const Icon(Icons.check_circle_outline),
+                      onPressed: store.members.isEmpty
+                          ? null
+                          : withTapHaptics(
+                              () => _openLogSessionSheet(
+                                context,
+                                initialTask: deadline.task,
+                              ),
+                            ),
+                    ),
+                  ),
+              ],
+            ],
           ),
         ),
         const SizedBox(height: 16),
@@ -1118,7 +1216,7 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
               const SizedBox(height: 16),
               MemberEquityRingChart(
                 members: store.members,
-                sessions: store.sessions,
+                sessions: sessions,
               ),
             ],
           ),
@@ -1150,7 +1248,7 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
                 ),
               ),
               const SizedBox(height: 14),
-              WeeklyPulseWaveChart(sessions: store.sessions),
+              WeeklyPulseWaveChart(sessions: sessions),
             ],
           ),
         ),
@@ -1173,9 +1271,9 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
               ),
               const SizedBox(height: 14),
               RoomEffortInfographic(
-                rooms: store.rooms,
-                tasks: store.tasks,
-                sessions: store.sessions,
+                rooms: store.currentRooms,
+                tasks: store.currentTasks,
+                sessions: sessions,
               ),
             ],
           ),
@@ -1216,27 +1314,30 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: CasviumColors.plum,
-                      borderRadius: BorderRadius.circular(99),
-                      border: Border.all(color: CasviumColors.ink, width: 1.5),
-                    ),
-                    child: const Text(
-                      'POSTGRESQL · RAILWAY CLOUD',
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w900,
-                        color: Colors.white,
-                        letterSpacing: 0.6,
-                        fontFamily: 'Segoe UI',
+                  Flexible(
+                    child: Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: CasviumColors.plum,
+                        borderRadius: BorderRadius.circular(99),
+                        border: Border.all(color: CasviumColors.ink, width: 1.5),
+                      ),
+                      child: const Text(
+                        'POSTGRESQL · RAILWAY CLOUD',
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w900,
+                          color: Colors.white,
+                          letterSpacing: 0.6,
+                          fontFamily: 'Segoe UI',
+                        ),
                       ),
                     ),
                   ),
-                  const Spacer(),
+                  const SizedBox(width: 8),
                   Icon(
                     store.isConnectedToRailway
                         ? Icons.cloud_done
@@ -1370,244 +1471,80 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
   }
 
   // =========================================================================
-  // MODALES PERSONALIZADOS: CREAR TAREA, REGISTRAR SESIÓN, HOGAR, MIEMBRO, ESTANCIA
+  // MODALES PERSONALIZADOS: REGISTRAR SESIÓN, HOGAR, MIEMBRO, ESTANCIA
   // =========================================================================
 
-  void _openCreateTaskSheet(
-    BuildContext context, {
-    String preselectedIconKey = 'mop_bucket',
-    String suggestedTitle = '',
-  }) {
-    final store = widget.store;
-    final titleCtrl = TextEditingController(text: suggestedTitle);
-    final descCtrl = TextEditingController();
-    String selectedIcon = preselectedIconKey;
-    int estimatedMins = 20;
-    bool isShared = true;
-    String frequency = 'Semanal';
-    final Set<String> selectedRooms = {
-      if (store.rooms.isNotEmpty) store.rooms.first.id,
+  Widget _buildTaskSchedule(ChoreTask task, TaskDeadline? deadline) {
+    final status = deadline?.status;
+    final date = deadline == null
+        ? ''
+        : DateFormat('dd/MM/yyyy').format(deadline.date);
+    final schedule = switch (status) {
+      TaskDeadlineStatus.overdue => ' · Venció el $date',
+      TaskDeadlineStatus.today => ' · Para hoy ($date)',
+      TaskDeadlineStatus.upcoming => ' · Próxima el $date',
+      null => '',
     };
+    final color = status == TaskDeadlineStatus.overdue
+        ? const Color(0xFF8C3226)
+        : CasviumColors.inkMuted;
 
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (ctx, setModalState) {
-            return Container(
-              height: MediaQuery.of(ctx).size.height * 0.88,
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-              decoration: const BoxDecoration(
-                color: CasviumColors.canvas,
-                borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-                border: Border(
-                  top: BorderSide(color: CasviumColors.ink, width: 2.5),
-                ),
-              ),
-              child: ListView(
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Nueva Tarea Doméstica',
-                        style: TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                      IconButton(
-                        onPressed: () => Navigator.pop(ctx),
-                        icon: const Icon(Icons.close),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: titleCtrl,
-                    decoration: _inputDecoration('Nombre de la tarea (ej. Limpiar horno)'),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: descCtrl,
-                    decoration:
-                        _inputDecoration('Descripción o truco de limpieza (opcional)'),
-                  ),
-                  const SizedBox(height: 14),
-
-                  // Selector de una o varias estancias
-                  const Text(
-                    'ESTANCIAS ASOCIADAS (PUEDES ELEGIR UNA O VARIAS)',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.7,
-                      color: CasviumColors.inkMuted,
-                      fontFamily: 'Segoe UI',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    children: store.rooms.map((room) {
-                      final active = selectedRooms.contains(room.id);
-                      return GestureDetector(
-                        onTap: () {
-                          setModalState(() {
-                            if (active && selectedRooms.length > 1) {
-                              selectedRooms.remove(room.id);
-                            } else {
-                              selectedRooms.add(room.id);
-                            }
-                          });
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 7),
-                          decoration: BoxDecoration(
-                            color: active ? room.color : CasviumColors.surface,
-                            borderRadius: BorderRadius.circular(99),
-                            border: Border.all(
-                                color: CasviumColors.ink, width: 1.6),
-                          ),
-                          child: Text(
-                            '${active ? "✓ " : ""}${room.name}',
-                            style: TextStyle(
-                              fontSize: 12.5,
-                              fontWeight: FontWeight.w800,
-                              color: active ? Colors.white : CasviumColors.ink,
-                              fontFamily: 'Segoe UI',
-                            ),
-                          ),
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                  const SizedBox(height: 14),
-
-                  // Selector personalizado de duración estimada
-                  DurationCustomSelector(
-                    minutes: estimatedMins,
-                    onChanged: (v) => setModalState(() => estimatedMins = v),
-                  ),
-                  const SizedBox(height: 14),
-
-                  // Toggle de tarea compartida
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text(
-                      'Tarea compartida entre miembros del hogar',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 14,
-                        fontFamily: 'Segoe UI',
-                      ),
-                    ),
-                    subtitle: const Text(
-                      'Permite rotarla o realizarla en pareja sumando puntos a ambos',
-                      style: TextStyle(fontSize: 12, fontFamily: 'Segoe UI'),
-                    ),
-                    activeColor: CasviumColors.sage,
-                    value: isShared,
-                    onChanged: (v) => setModalState(() => isShared = v),
-                  ),
-                  const SizedBox(height: 10),
-
-                  // Selector de los 30 iconos
-                  const Text(
-                    'ELIGE UN ICONO (30 ICONOS DISPONIBLES)',
-                    style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 0.7,
-                      color: CasviumColors.inkMuted,
-                      fontFamily: 'Segoe UI',
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: ChoreIconsCatalog.all.length,
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 5,
-                      mainAxisSpacing: 8,
-                      crossAxisSpacing: 8,
-                      childAspectRatio: 0.85,
-                    ),
-                    itemBuilder: (context, index) {
-                      final iconDef = ChoreIconsCatalog.all[index];
-                      final isChosen = iconDef.key == selectedIcon;
-                      return GestureDetector(
-                        onTap: () =>
-                            setModalState(() => selectedIcon = iconDef.key),
-                        child: Container(
-                          padding: const EdgeInsets.all(4),
-                          decoration: BoxDecoration(
-                            color: isChosen
-                                ? CasviumColors.mustard.withOpacity(0.45)
-                                : Colors.transparent,
-                            borderRadius: BorderRadius.circular(14),
-                            border: isChosen
-                                ? Border.all(
-                                    color: CasviumColors.ink, width: 2)
-                                : null,
-                          ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              ChoreCustomIcon(
-                                iconKey: iconDef.key,
-                                size: 38,
-                              ),
-                              const SizedBox(height: 3),
-                              Text(
-                                iconDef.label,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.w700,
-                                  fontFamily: 'Segoe UI',
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 18),
-                  CasviumActionPill(
-                    label: 'Guardar Tarea en el Hogar',
-                    icon: Icons.check,
-                    color: CasviumColors.terracotta,
-                    onPressed: () {
-                      if (titleCtrl.text.trim().isEmpty) return;
-                      store.addChoreTask(
-                        title: titleCtrl.text.trim(),
-                        description: descCtrl.text.trim(),
-                        iconKey: selectedIcon,
-                        roomIds: selectedRooms.toList(),
-                        estimatedMinutes: estimatedMins,
-                        isShared: isShared,
-                        frequencyLabel: frequency,
-                        intensity: 2,
-                      );
-                      Navigator.pop(ctx);
-                    },
-                  ),
-                ],
-              ),
-            );
+    return Row(
+      children: [
+        Icon(
+          switch (status) {
+            TaskDeadlineStatus.overdue => Icons.warning_amber_rounded,
+            TaskDeadlineStatus.today => Icons.today_outlined,
+            _ => Icons.calendar_today_outlined,
           },
-        );
-      },
+          size: 16,
+          color: color,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            '${task.frequency.label}$schedule',
+            style: TextStyle(
+              fontSize: 12.5,
+              color: color,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
     );
+  }
+
+  Future<void> _openTaskFrequencyDialog(
+    BuildContext context,
+    ChoreTask task,
+  ) async {
+    var frequency = task.frequency;
+    final selected = await showDialog<TaskFrequency>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text(task.title),
+        content: _buildFrequencyPicker(
+          frequency: frequency,
+          onChanged: (value) => frequency = value,
+        ),
+        actions: [
+          TextButton(
+            onPressed: withTapHaptics(() => Navigator.pop(dialogContext)),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: withTapHaptics(
+              () => Navigator.pop(dialogContext, frequency),
+            ),
+            child: const Text('Guardar periodicidad'),
+          ),
+        ],
+      ),
+    );
+    if (mounted && selected != null) {
+      widget.store.updateChoreTaskFrequency(task.id, selected);
+    }
   }
 
   void _openLogSessionSheet(
@@ -1616,14 +1553,16 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
     int? initialMinutes,
   }) {
     final store = widget.store;
-    if (store.tasks.isEmpty || store.members.isEmpty) return;
+    final tasks = store.currentTasks;
+    final rooms = store.currentRooms;
+    if (tasks.isEmpty || store.members.isEmpty) return;
 
-    ChoreTask selectedTask = initialTask ?? store.tasks.first;
+    ChoreTask selectedTask = initialTask ?? tasks.first;
     String selectedMemberId = store.members.first.id;
     String loggedByUser = store.activeLoggedUser;
     String? selectedRoomId = selectedTask.roomIds.isNotEmpty
         ? selectedTask.roomIds.first
-        : (store.rooms.isNotEmpty ? store.rooms.first.id : null);
+        : (rooms.isNotEmpty ? rooms.first.id : null);
     int durationMinutes = initialMinutes ?? selectedTask.estimatedMinutes;
     DateTime sessionDate = DateTime.now();
     final Set<String> coWorkerIds = {};
@@ -1651,15 +1590,17 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        'Registrar Sesión de Trabajo',
-                        style: TextStyle(
-                          fontSize: 21,
-                          fontWeight: FontWeight.w900,
+                      const Expanded(
+                        child: Text(
+                          'Registrar Sesión de Trabajo',
+                          style: TextStyle(
+                            fontSize: 21,
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
                       ),
                       IconButton(
-                        onPressed: () => Navigator.pop(ctx),
+                        onPressed: withTapHaptics(() => Navigator.pop(ctx)),
                         icon: const Icon(Icons.close),
                       ),
                     ],
@@ -1678,9 +1619,11 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
                   ),
                   const SizedBox(height: 6),
                   DropdownButtonFormField<String>(
-                    value: selectedTask.id,
+                    onTap: HapticFeedback.selectionClick,
+                    initialValue: selectedTask.id,
+                    isExpanded: true,
                     decoration: _inputDecoration('Tarea'),
-                    items: store.tasks
+                    items: tasks
                         .map(
                           (t) => DropdownMenuItem(
                             value: t.id,
@@ -1705,6 +1648,11 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
                       }
                     },
                   ),
+                  const SizedBox(height: 8),
+                  _buildTaskSchedule(
+                    selectedTask,
+                    store.taskDeadlines(now: DateTime.now())[selectedTask.id],
+                  ),
                   const SizedBox(height: 14),
 
                   // 2. Miembro ejecutor y Usuario que registra
@@ -1725,7 +1673,9 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
                             ),
                             const SizedBox(height: 6),
                             DropdownButtonFormField<String>(
+                              onTap: HapticFeedback.selectionClick,
                               value: selectedMemberId,
+                              isExpanded: true,
                               decoration: _inputDecoration('Miembro'),
                               items: store.members
                                   .map(
@@ -1760,7 +1710,9 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
                             ),
                             const SizedBox(height: 6),
                             DropdownButtonFormField<String>(
+                              onTap: HapticFeedback.selectionClick,
                               value: loggedByUser,
+                              isExpanded: true,
                               decoration: _inputDecoration('Usuario'),
                               items: store.members
                                   .map(
@@ -1801,13 +1753,18 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
                             ),
                             const SizedBox(height: 6),
                             DropdownButtonFormField<String>(
-                              value: selectedRoomId,
+                              onTap: HapticFeedback.selectionClick,
+                              initialValue: selectedRoomId,
+                              isExpanded: true,
                               decoration: _inputDecoration('Estancia'),
-                              items: store.rooms
+                              items: rooms
                                   .map(
                                     (r) => DropdownMenuItem(
                                       value: r.id,
-                                      child: Text(r.name),
+                                      child: Text(
+                                        r.name,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
                                     ),
                                   )
                                   .toList(),
@@ -1937,7 +1894,10 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
                 children: CasviumColors.memberPalette.map((c) {
                   final sel = c.value == chosenColor.value;
                   return GestureDetector(
-                    onTap: () => setDState(() => chosenColor = c),
+                    onTap: () {
+                      HapticFeedback.selectionClick();
+                      setDState(() => chosenColor = c);
+                    },
                     child: Container(
                       width: 30,
                       height: 30,
@@ -1957,7 +1917,7 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
+              onPressed: withTapHaptics(() => Navigator.pop(ctx)),
               child: const Text('Cancelar'),
             ),
             CasviumActionPill(
@@ -2002,7 +1962,9 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
               ),
               const SizedBox(height: 12),
               DropdownButtonFormField<String>(
+                onTap: HapticFeedback.selectionClick,
                 value: selectedIcon,
+                isExpanded: true,
                 decoration: _inputDecoration('Icono de la estancia'),
                 items: ChoreIconsCatalog.all
                     .map(
@@ -2020,7 +1982,7 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
+              onPressed: withTapHaptics(() => Navigator.pop(ctx)),
               child: const Text('Cancelar'),
             ),
             CasviumActionPill(
@@ -2078,7 +2040,7 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(ctx),
+            onPressed: withTapHaptics(() => Navigator.pop(ctx)),
             child: const Text('Cancelar'),
           ),
           CasviumActionPill(
@@ -2105,20 +2067,314 @@ class _CasviumHomeShellState extends State<CasviumHomeShell> {
       ),
     );
   }
+}
 
-  InputDecoration _inputDecoration(String label) {
-    return InputDecoration(
-      labelText: label,
-      filled: true,
-      fillColor: CasviumColors.surface,
-      border: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: CasviumColors.ink, width: 1.6),
+class _CreateTaskScreen extends StatefulWidget {
+  const _CreateTaskScreen({required this.store});
+
+  final CasviumStore store;
+
+  @override
+  State<_CreateTaskScreen> createState() => _CreateTaskScreenState();
+}
+
+class _CreateTaskScreenState extends State<_CreateTaskScreen> {
+  final _titleController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  late final _rooms = widget.store.currentRooms;
+  late final Set<String> _selectedRoomIds = {
+    if (_rooms.isNotEmpty) _rooms.first.id,
+  };
+  String _selectedIcon = 'mop_bucket';
+  int _estimatedMinutes = 20;
+  bool _isShared = true;
+  TaskFrequency _frequency = TaskFrequency.weekly;
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  void _saveTask() {
+    final title = _titleController.text.trim();
+    if (title.isEmpty) return;
+
+    widget.store.addChoreTask(
+      title: title,
+      description: _descriptionController.text.trim(),
+      iconKey: _selectedIcon,
+      roomIds: _selectedRoomIds.toList(),
+      estimatedMinutes: _estimatedMinutes,
+      isShared: _isShared,
+      frequency: _frequency,
+      intensity: 2,
+    );
+    Navigator.of(context).pop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    const iconSize = 34.0;
+    const iconLabelSize = 10.0;
+    const iconTileMinWidth = 66.0;
+    final scaledLabelSize = MediaQuery.textScalerOf(context).scale(iconLabelSize);
+    final iconTileWidth = iconTileMinWidth *
+        (scaledLabelSize / iconLabelSize).clamp(1.0, double.infinity);
+    final navigator = Navigator.of(context);
+
+    return Scaffold(
+      backgroundColor: CasviumColors.canvas,
+      appBar: AppBar(
+        backgroundColor: CasviumColors.canvas,
+        leading: IconButton(
+          tooltip: 'Volver',
+          onPressed: withTapHaptics(navigator.pop),
+          icon: const BackButtonIcon(),
+        ),
+        title: const Text('Nueva tarea'),
+        actions: [
+          TextButton(
+            onPressed: withTapHaptics(navigator.pop),
+            child: const Text('Cancelar'),
+          ),
+          const SizedBox(width: 8),
+        ],
       ),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: CasviumColors.ink, width: 1.6),
+      body: SafeArea(
+        top: false,
+        child: Align(
+          alignment: Alignment.topCenter,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 760),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              children: [
+                TextField(
+                  controller: _titleController,
+                  decoration: _inputDecoration(
+                    'Nombre de la tarea (ej. Limpiar horno)',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: _descriptionController,
+                  decoration: _inputDecoration(
+                    'Descripción o truco de limpieza (opcional)',
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                _buildFrequencyPicker(
+                  frequency: _frequency,
+                  onChanged: (value) => _frequency = value,
+                ),
+                const SizedBox(height: 14),
+
+                // Selector de una o varias estancias
+                const Text(
+                  'ESTANCIAS ASOCIADAS (PUEDES ELEGIR UNA O VARIAS)',
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.7,
+                    color: CasviumColors.inkMuted,
+                    fontFamily: 'Segoe UI',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: _rooms.map((room) {
+                    final active = _selectedRoomIds.contains(room.id);
+                    return GestureDetector(
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        setState(() {
+                          if (active && _selectedRoomIds.length > 1) {
+                            _selectedRoomIds.remove(room.id);
+                          } else {
+                            _selectedRoomIds.add(room.id);
+                          }
+                        });
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 12, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: active ? room.color : CasviumColors.surface,
+                          borderRadius: BorderRadius.circular(99),
+                          border: Border.all(
+                              color: CasviumColors.ink, width: 1.6),
+                        ),
+                        child: Text(
+                          '${active ? "✓ " : ""}${room.name}',
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                            color: active ? Colors.white : CasviumColors.ink,
+                            fontFamily: 'Segoe UI',
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 14),
+
+                // Selector personalizado de duración estimada
+                DurationCustomSelector(
+                  minutes: _estimatedMinutes,
+                  onChanged: (v) => setState(() => _estimatedMinutes = v),
+                ),
+                const SizedBox(height: 14),
+
+                // Toggle de tarea compartida
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Tarea compartida entre miembros del hogar',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      fontSize: 14,
+                      fontFamily: 'Segoe UI',
+                    ),
+                  ),
+                  subtitle: const Text(
+                    'Permite rotarla o realizarla en pareja sumando puntos a ambos',
+                    style: TextStyle(fontSize: 12, fontFamily: 'Segoe UI'),
+                  ),
+                  activeThumbColor: CasviumColors.sage,
+                  value: _isShared,
+                  onChanged: (v) => setState(() => _isShared = v),
+                ),
+                const SizedBox(height: 10),
+
+                // Selector de los 30 iconos
+                Text(
+                  'ICONO DE LA TAREA · ${ChoreIconsCatalog.byKey(_selectedIcon).label}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.7,
+                    color: CasviumColors.inkMuted,
+                    fontFamily: 'Segoe UI',
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: ChoreIconsCatalog.all.map((iconDef) {
+                    final isChosen = iconDef.key == _selectedIcon;
+                    return Semantics(
+                      button: true,
+                      selected: isChosen,
+                      child: Tooltip(
+                        message: iconDef.label,
+                        excludeFromSemantics: true,
+                        child: GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            HapticFeedback.selectionClick();
+                            setState(() => _selectedIcon = iconDef.key);
+                          },
+                          child: Container(
+                            width: iconTileWidth,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 1.5,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isChosen
+                                  ? CasviumColors.mustard.withValues(alpha: 0.45)
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isChosen
+                                    ? CasviumColors.ink
+                                    : Colors.transparent,
+                                width: 1.5,
+                              ),
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                ChoreCustomIcon(
+                                  iconKey: iconDef.key,
+                                  size: iconSize,
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  iconDef.label,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    fontSize: iconLabelSize,
+                                    height: 1.2,
+                                    fontWeight: FontWeight.w700,
+                                    fontFamily: 'Segoe UI',
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 18),
+                CasviumActionPill(
+                  label: 'Guardar Tarea en el Hogar',
+                  icon: Icons.check,
+                  color: CasviumColors.terracotta,
+                  onPressed: _saveTask,
+                ),
+              ],
+            ),
+          ),
+        ),
       ),
     );
   }
+}
+
+Widget _buildFrequencyPicker({
+  required TaskFrequency frequency,
+  required ValueChanged<TaskFrequency> onChanged,
+}) {
+  return DropdownButtonFormField<TaskFrequency>(
+    onTap: HapticFeedback.selectionClick,
+    initialValue: frequency,
+    isExpanded: true,
+    decoration: _inputDecoration('Periodicidad'),
+    items: [
+      for (final option in TaskFrequency.values)
+        DropdownMenuItem(
+          value: option,
+          child: Text(option.label, overflow: TextOverflow.ellipsis),
+        ),
+    ],
+    onChanged: (value) {
+      if (value != null) onChanged(value);
+    },
+  );
+}
+
+InputDecoration _inputDecoration(String label) {
+  return InputDecoration(
+    labelText: label,
+    filled: true,
+    fillColor: CasviumColors.surface,
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: const BorderSide(color: CasviumColors.ink, width: 1.6),
+    ),
+    enabledBorder: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(14),
+      borderSide: const BorderSide(color: CasviumColors.ink, width: 1.6),
+    ),
+  );
 }
