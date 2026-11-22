@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:casvium/models/models.dart';
+import 'package:casvium/services/local_household_storage.dart';
 import 'package:casvium/services/railway_postgres_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -114,5 +117,116 @@ void main() {
     expect(deadline.task.createdAt, task.createdAt);
     expect(restored.currentSessions.first.performedAt, performedAt);
     expect(deadline.date, TaskFrequency.monthly.nextAfter(performedAt));
+  });
+
+  test('Los cambios de ejemplo y Railway se conservan en su propio origen',
+      () async {
+    SharedPreferences.setMockInitialValues({});
+    final preferences = await SharedPreferences.getInstance();
+    final household = Household(
+      id: 'real-home',
+      name: 'Hogar de Railway',
+      inviteCode: 'CASV-RAILWAY',
+      createdAt: DateTime(2026, 11, 1),
+    );
+    var reads = 0;
+    HouseholdSnapshot? uploaded;
+    final store = CasviumStore(
+      preferences: preferences,
+      loadRailway: (_, id) async {
+        expect(id, reads == 0 ? '' : household.id);
+        reads++;
+        return HouseholdSnapshot(
+          household: household,
+          households: [household],
+          members: [],
+          rooms: [],
+          tasks: [],
+          sessions: [],
+          activeLoggedUser: '',
+        );
+      },
+      saveRailway: (_, snapshot) async => uploaded = snapshot,
+    )..railwayConnection = 'conexión de prueba';
+
+    final exampleTask = store.currentTasks.first;
+    store.updateChoreTaskFrequency(exampleTask.id, TaskFrequency.none);
+    await store.syncWithRailwayPostgres();
+    expect(uploaded, isNull);
+
+    await store.selectDataSource(CasviumDataSource.railway);
+    expect(store.currentHousehold.id, household.id);
+    expect(store.currentTasks, isEmpty);
+    store.addRoom(
+        name: 'Cuarto real', iconKey: 'mop_bucket', colorHex: '#4A7C59');
+
+    await store.selectDataSource(CasviumDataSource.example);
+    expect(store.currentTasks.first.frequency, TaskFrequency.none);
+    expect(
+        store.currentRooms.any((room) => room.name == 'Cuarto real'), isFalse);
+
+    await store.selectDataSource(CasviumDataSource.railway);
+    expect(reads, 1);
+    expect(store.currentRooms.single.name, 'Cuarto real');
+    expect(store.hasPendingRailwayChanges, isTrue);
+
+    await Future<void>.delayed(Duration.zero);
+    await preferences.reload();
+    final restored = CasviumStore(preferences: preferences);
+    expect(restored.dataSource, CasviumDataSource.railway);
+    expect(restored.hasPendingRailwayChanges, isTrue);
+    expect(restored.currentRooms.single.name, 'Cuarto real');
+
+    await store.syncWithRailwayPostgres();
+    expect(uploaded!.household.id, household.id);
+    expect(uploaded!.rooms.single.name, 'Cuarto real');
+    expect(store.hasPendingRailwayChanges, isFalse);
+  });
+
+  test('El hogar de ejemplo se excluye de los datos reales, incluida la caché',
+      () async {
+    final example = CasviumStore();
+    final snapshot = HouseholdSnapshot(
+      household: example.currentHousehold,
+      households: example.households,
+      members: example.members,
+      rooms: example.rooms,
+      tasks: example.tasks,
+      sessions: example.sessions,
+      activeLoggedUser: example.activeLoggedUser,
+    );
+    SharedPreferences.setMockInitialValues({
+      'casvium.dataSource': 'railway',
+      'casvium.railway.household.v1': jsonEncode({
+        'snapshot': snapshot.encode(),
+        'pending': true,
+      }),
+    });
+
+    final preferences = await SharedPreferences.getInstance();
+    final store = CasviumStore(
+      preferences: preferences,
+      loadRailway: (_, id) async {
+        expect(id, isEmpty);
+        return snapshot;
+      },
+      saveRailway: (_, __) async =>
+          fail('Se intentó subir el hogar de ejemplo'),
+    )..railwayConnection = 'conexión de prueba';
+    expect(store.dataSource, CasviumDataSource.railway);
+    expect(store.hasHousehold, isFalse);
+    expect(store.hasPendingRailwayChanges, isFalse);
+
+    await store.syncWithRailwayPostgres();
+    expect(store.isConnectedToRailway, isTrue);
+    expect(store.hasHousehold, isFalse);
+    expect(store.members, isEmpty);
+    expect(store.currentRooms, isEmpty);
+    expect(store.currentTasks, isEmpty);
+    expect(store.currentSessions, isEmpty);
+
+    await store.selectDataSource(CasviumDataSource.example);
+    expect(store.currentHousehold.id, snapshot.household.id);
+    expect(store.currentTasks, isNotEmpty);
   });
 }

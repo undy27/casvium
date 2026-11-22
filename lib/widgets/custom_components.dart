@@ -140,7 +140,7 @@ class CasviumFloatingDock extends StatelessWidget {
     (label: 'Tareas', iconKey: 'broom_dustpan'),
     (label: 'Sesiones', iconKey: 'cooking_pot'),
     (label: 'Infografías', iconKey: 'watering_can'),
-    (label: 'Railway DB', iconKey: 'pantry_jars'),
+    (label: 'Ajustes', iconKey: 'pantry_jars'),
   ];
 
   @override

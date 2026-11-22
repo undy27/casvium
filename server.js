@@ -1,4 +1,5 @@
 const http = require('http');
+const { createHash, timingSafeEqual } = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
@@ -10,74 +11,35 @@ const pool = process.env.DATABASE_URL
   ? new Pool({
       connectionString: process.env.DATABASE_URL,
       ssl: { rejectUnauthorized: false },
+      connectionTimeoutMillis: 10000,
+      statement_timeout: 10000,
     })
   : null;
 
-async function ensureSchema() {
-  if (!pool) return;
-  const client = await pool.connect();
-  try {
-    await client.query(`
-      CREATE TABLE IF NOT EXISTS households (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL,
-        invite_code TEXT NOT NULL,
-        mascot_name TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-      CREATE TABLE IF NOT EXISTS household_members (
-        id TEXT PRIMARY KEY,
-        household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,
-        name TEXT NOT NULL,
-        role TEXT NOT NULL,
-        avatar_color TEXT NOT NULL,
-        streak_days INT NOT NULL DEFAULT 1
-      );
-      CREATE TABLE IF NOT EXISTS rooms (
-        id TEXT PRIMARY KEY,
-        household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,
-        name TEXT NOT NULL,
-        icon_key TEXT NOT NULL,
-        color_hex TEXT NOT NULL,
-        is_default BOOLEAN NOT NULL DEFAULT FALSE
-      );
-      CREATE TABLE IF NOT EXISTS chore_tasks (
-        id TEXT PRIMARY KEY,
-        household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,
-        title TEXT NOT NULL,
-        description TEXT NOT NULL,
-        icon_key TEXT NOT NULL,
-        estimated_minutes INT NOT NULL,
-        is_shared BOOLEAN NOT NULL DEFAULT TRUE,
-        frequency_label TEXT NOT NULL,
-        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      );
-      ALTER TABLE chore_tasks
-        ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT NOW();
-      CREATE TABLE IF NOT EXISTS task_rooms (
-        task_id TEXT NOT NULL REFERENCES chore_tasks(id) ON DELETE CASCADE,
-        room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
-        PRIMARY KEY (task_id, room_id)
-      );
-      CREATE TABLE IF NOT EXISTS work_sessions (
-        id TEXT PRIMARY KEY,
-        household_id TEXT NOT NULL REFERENCES households(id) ON DELETE CASCADE,
-        task_id TEXT NOT NULL REFERENCES chore_tasks(id) ON DELETE CASCADE,
-        member_id TEXT NOT NULL REFERENCES household_members(id) ON DELETE CASCADE,
-        logged_by_user TEXT NOT NULL,
-        room_id TEXT,
-        performed_at TIMESTAMPTZ NOT NULL,
-        duration_minutes INT NOT NULL,
-        energy_level INT NOT NULL,
-        notes TEXT NOT NULL
-      );
-    `);
-    console.log('Railway PostgreSQL schema ready.');
-  } catch (err) {
-    console.error('Schema init warning:', err.message);
-  } finally {
-    client.release();
+const schema = fs.readFileSync(path.join(__dirname, 'sql', 'railway_compatibility.sql'), 'utf8');
+const householdQuery = fs.readFileSync(path.join(__dirname, 'sql', 'household_snapshot.sql'), 'utf8');
+const accessKey = process.env.CASVIUM_DATA_ACCESS_KEY?.trim();
+const hash = (value) => createHash('sha256').update(value).digest();
+const expectedAuthorization = accessKey && hash(`Bearer ${accessKey}`);
+
+function sendJson(res, status, body) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+  });
+  res.end(JSON.stringify(body));
+}
+
+function authorizeDataAccess(req, res) {
+  if (!pool || !expectedAuthorization) {
+    sendJson(res, 503, { ok: false });
+    return false;
   }
+  if (!timingSafeEqual(hash(req.headers.authorization || ''), expectedAuthorization)) {
+    sendJson(res, 401, { ok: false });
+    return false;
+  }
+  return true;
 }
 
 const MIME_TYPES = {
@@ -103,79 +65,118 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.url === '/api/sync' && req.method === 'POST') {
-    let body = '';
-    req.on('data', (chunk) => (body += chunk));
-    req.on('end', async () => {
-      if (!pool) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, error: 'DATABASE_URL not set' }));
+  const url = new URL(req.url, 'http://localhost');
+  if (url.pathname === '/api/household' && req.method === 'GET') {
+    if (!authorizeDataAccess(req, res)) return;
+    try {
+      const { rows } = await pool.query(householdQuery, [url.searchParams.get('id') || '']);
+      sendJson(res, 200, { ok: true, snapshot: rows[0]?.snapshot ?? null });
+    } catch (error) {
+      if (error.code === '42P01') {
+        sendJson(res, 200, { ok: true, snapshot: null });
+      } else {
+        console.error('Railway household load failed:', error.message);
+        sendJson(res, 500, { ok: false });
+      }
+    }
+    return;
+  }
+
+  if (url.pathname === '/api/sync' && req.method === 'POST') {
+    if (!authorizeDataAccess(req, res)) return;
+    let client;
+    try {
+      const chunks = [];
+      let size = 0;
+      for await (const chunk of req) {
+        size += chunk.length;
+        if (size > 10 * 1024 * 1024) {
+          sendJson(res, 413, { ok: false });
+          return;
+        }
+        chunks.push(chunk);
+      }
+      let data;
+      try {
+        data = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      } catch {
+        sendJson(res, 400, { ok: false });
         return;
       }
-      const client = await pool.connect();
-      try {
-        await ensureSchema();
-        const data = JSON.parse(body || '{}');
-        const h = data.household;
-        if (h) {
-          await client.query(
-            `INSERT INTO households (id, name, invite_code, mascot_name, created_at)
-             VALUES ($1, $2, $3, $4, $5)
-             ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, mascot_name = EXCLUDED.mascot_name`,
-            [h.id, h.name, h.inviteCode, h.mascotName, h.createdAt]
-          );
-        }
-        for (const m of data.members || []) {
-          await client.query(
-            `INSERT INTO household_members (id, household_id, name, role, avatar_color, streak_days)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, avatar_color = EXCLUDED.avatar_color`,
-            [m.id, m.householdId, m.name, m.role, m.avatarColorHex, m.streakDays]
-          );
-        }
-        for (const r of data.rooms || []) {
-          await client.query(
-            `INSERT INTO rooms (id, household_id, name, icon_key, color_hex, is_default)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, icon_key = EXCLUDED.icon_key, color_hex = EXCLUDED.color_hex`,
-            [r.id, r.householdId, r.name, r.iconKey, r.colorHex, r.isDefault]
-          );
-        }
-        for (const t of data.tasks || []) {
-          await client.query(
-            `INSERT INTO chore_tasks (id, household_id, title, description, icon_key, estimated_minutes, is_shared, frequency_label, created_at)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::timestamptz, NOW()))
-             ON CONFLICT (id) DO UPDATE SET
-               title = EXCLUDED.title,
-               estimated_minutes = EXCLUDED.estimated_minutes,
-               is_shared = EXCLUDED.is_shared,
-               frequency_label = EXCLUDED.frequency_label`,
-            [t.id, t.householdId, t.title, t.description, t.iconKey, t.estimatedMinutes, t.isShared, t.frequencyLabel, t.createdAt ?? null]
-          );
-          for (const rId of t.roomIds || []) {
-            await client.query(
-              `INSERT INTO task_rooms (task_id, room_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-              [t.id, rId]
-            );
-          }
-        }
-        for (const s of data.sessions || []) {
-          await client.query(
-            `INSERT INTO work_sessions (id, household_id, task_id, member_id, logged_by_user, room_id, performed_at, duration_minutes, energy_level, notes)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-             ON CONFLICT (id) DO NOTHING`,
-            [s.id, s.householdId, s.taskId, s.memberId, s.loggedByUser, s.roomId, s.performedAt, s.durationMinutes, s.energyLevel, s.notes]
-          );
-        }
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true }));
-      } catch (err) {
-        res.writeHead(500, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, error: err.message }));
-      } finally {
-        client.release();
+      if (!data?.household?.id || data.household.id === 'home-villa-olivo') {
+        sendJson(res, 400, { ok: false });
+        return;
       }
-    });
+      client = await pool.connect();
+      await client.query('BEGIN');
+      await client.query(schema);
+      const h = data.household;
+      if (h) {
+        await client.query(
+          `INSERT INTO households (id, name, invite_code, mascot_name, created_at)
+           VALUES ($1, $2, $3, $4, $5)
+           ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, mascot_name = EXCLUDED.mascot_name`,
+          [h.id, h.name, h.inviteCode, h.mascotName, h.createdAt]
+        );
+      }
+      for (const m of data.members || []) {
+        await client.query(
+          `INSERT INTO household_members (id, household_id, name, role, avatar_color, streak_days)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, avatar_color = EXCLUDED.avatar_color,
+             streak_days = EXCLUDED.streak_days`,
+          [m.id, m.householdId, m.name, m.role, m.avatarColorHex, m.streakDays]
+        );
+      }
+      for (const r of data.rooms || []) {
+        await client.query(
+          `INSERT INTO rooms (id, household_id, name, icon_key, color_hex, is_default)
+           VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, icon_key = EXCLUDED.icon_key, color_hex = EXCLUDED.color_hex,
+             is_default = EXCLUDED.is_default`,
+          [r.id, r.householdId, r.name, r.iconKey, r.colorHex, r.isDefault]
+        );
+      }
+      for (const t of data.tasks || []) {
+        await client.query(
+          `INSERT INTO chore_tasks (id, household_id, title, description, icon_key, estimated_minutes, is_shared, frequency_label, created_at, intensity)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, COALESCE($9::timestamptz, NOW()), $10)
+           ON CONFLICT (id) DO UPDATE SET
+             title = EXCLUDED.title,
+             description = EXCLUDED.description,
+             icon_key = EXCLUDED.icon_key,
+             estimated_minutes = EXCLUDED.estimated_minutes,
+             is_shared = EXCLUDED.is_shared,
+             frequency_label = EXCLUDED.frequency_label,
+             intensity = EXCLUDED.intensity`,
+          [t.id, t.householdId, t.title, t.description, t.iconKey, t.estimatedMinutes, t.isShared, t.frequencyLabel, t.createdAt ?? null, t.intensity ?? 2]
+        );
+        for (const rId of t.roomIds || []) {
+          await client.query(
+            `INSERT INTO task_rooms (task_id, room_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+            [t.id, rId]
+          );
+        }
+      }
+      for (const s of data.sessions || []) {
+        await client.query(
+          `INSERT INTO work_sessions (id, household_id, task_id, member_id, logged_by_user, room_id, performed_at, duration_minutes, co_workers, energy_level, notes)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           ON CONFLICT (id) DO NOTHING`,
+          [s.id, s.householdId, s.taskId, s.memberId, s.loggedByUser, s.roomId, s.performedAt, s.durationMinutes, s.coWorkerIds ?? [], s.energyLevel, s.notes]
+        );
+      }
+      await client.query('COMMIT');
+      sendJson(res, 200, { ok: true });
+    } catch (error) {
+      if (client) {
+        await client.query('ROLLBACK').catch(() => {});
+      }
+      console.error('Railway household sync failed:', error.message);
+      sendJson(res, 500, { ok: false });
+    } finally {
+      client?.release();
+    }
     return;
   }
 
@@ -189,8 +190,6 @@ const server = http.createServer(async (req, res) => {
   fs.createReadStream(filePath).pipe(res);
 });
 
-ensureSchema().then(() => {
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`Casvium Web + Railway Postgres gateway listening on port ${PORT}`);
-  });
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`Casvium Web + Railway Postgres gateway listening on port ${PORT}`);
 });

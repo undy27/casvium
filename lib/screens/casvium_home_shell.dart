@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -27,8 +28,13 @@ class _CasviumHomeShellState extends State<CasviumHomeShell>
   int _selectedTab = 0;
   String? _selectedRoomFilterId;
   MascotMood _mascotMood = MascotMood.happy;
-  String _mascotMessage =
+  static const _exampleMascotMessage =
       '¡Hola! Soy Don Mocho. Hoy la cocina y el salón brillan, ¿registramos una sesión rápida?';
+
+  String? _mascotMessage;
+  late final _railwayAccessKeyController = kIsWeb
+      ? TextEditingController(text: widget.store.railwayAccessKey)
+      : null;
 
   // Cronómetro en vivo para sesiones de trabajo
   Timer? _liveTimer;
@@ -69,6 +75,7 @@ class _CasviumHomeShellState extends State<CasviumHomeShell>
     WidgetsBinding.instance.removeObserver(this);
     _deadlineTimer?.cancel();
     _reportsScrollController.dispose();
+    _railwayAccessKeyController?.dispose();
     _liveTimer?.cancel();
     super.dispose();
   }
@@ -111,13 +118,17 @@ class _CasviumHomeShellState extends State<CasviumHomeShell>
     return ListenableBuilder(
       listenable: widget.store,
       builder: (context, _) {
-        final deadlines = widget.store.taskDeadlines(now: DateTime.now());
+        final store = widget.store;
+        final deadlines = store.taskDeadlines(now: DateTime.now());
         final tabs = [
-          _buildDashboardTab(context, deadlines),
-          _buildTasksTab(context, deadlines),
-          _buildWorkSessionsTab(context),
-          _buildInfographicsTab(context, deadlines.values),
-          _buildHouseholdAndRailwayTab(context),
+          if (store.hasHousehold) ...[
+            _buildDashboardTab(context, deadlines),
+            _buildTasksTab(context, deadlines),
+            _buildWorkSessionsTab(context),
+            _buildInfographicsTab(context, deadlines.values),
+          ] else
+            for (var index = 0; index < 4; index++) _buildEmptyHouseholdTab(),
+          _buildSettingsTab(context),
         ];
         return Scaffold(
           backgroundColor: CasviumColors.canvas,
@@ -143,7 +154,9 @@ class _CasviumHomeShellState extends State<CasviumHomeShell>
           ),
           bottomNavigationBar: CasviumFloatingDock(
             currentIndex: _selectedTab,
-            onChanged: (index) => setState(() => _selectedTab = index),
+            onChanged: (index) {
+              if (!store.isSyncing) setState(() => _selectedTab = index);
+            },
           ),
         );
       },
@@ -202,71 +215,74 @@ class _CasviumHomeShellState extends State<CasviumHomeShell>
             ),
           ),
           // Selector rápido de usuario activo que registra sesiones
-          PopupMenuButton<String>(
-            onOpened: HapticFeedback.selectionClick,
-            onSelected: store.setActiveLoggedUser,
-            color: CasviumColors.surface,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-              side: const BorderSide(color: CasviumColors.ink, width: 2),
-            ),
-            itemBuilder: (context) => store.members
-                .map(
-                  (m) => PopupMenuItem<String>(
-                    value: m.name,
-                    child: Row(
-                      children: [
-                         CircleAvatar(
-                          radius: 11,
-                          backgroundColor: m.color,
-                          child: Text(
-                            m.initials,
-                            style: const TextStyle(
-                              fontSize: 10,
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
+          if (store.members.isNotEmpty)
+            PopupMenuButton<String>(
+              enabled: !store.isSyncing,
+              onOpened: HapticFeedback.selectionClick,
+              onSelected: store.setActiveLoggedUser,
+              color: CasviumColors.surface,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: const BorderSide(color: CasviumColors.ink, width: 2),
+              ),
+              itemBuilder: (context) => store.members
+                  .map(
+                    (m) => PopupMenuItem<String>(
+                      value: m.name,
+                      child: Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 11,
+                            backgroundColor: m.color,
+                            child: Text(
+                              m.initials,
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Usuario: ${m.name}',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w700,
-                            fontFamily: 'Segoe UI',
+                          const SizedBox(width: 8),
+                          Text(
+                            'Usuario: ${m.name}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontFamily: 'Segoe UI',
+                            ),
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
-                )
-                .toList(),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-              decoration: BoxDecoration(
-                color: CasviumColors.surface,
-                borderRadius: BorderRadius.circular(99),
-                border: Border.all(color: CasviumColors.ink, width: 1.8),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const Icon(Icons.person_outline,
-                      size: 15, color: CasviumColors.ink),
-                  const SizedBox(width: 4),
-                  Text(
-                    store.activeLoggedUser,
-                    style: const TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w800,
-                      color: CasviumColors.ink,
-                      fontFamily: 'Segoe UI',
+                  )
+                  .toList(),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+                decoration: BoxDecoration(
+                  color: CasviumColors.surface,
+                  borderRadius: BorderRadius.circular(99),
+                  border: Border.all(color: CasviumColors.ink, width: 1.8),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.person_outline,
+                        size: 15, color: CasviumColors.ink),
+                    const SizedBox(width: 4),
+                    Text(
+                      store.activeLoggedUser,
+                      style: const TextStyle(
+                        fontSize: 12.5,
+                        fontWeight: FontWeight.w800,
+                        color: CasviumColors.ink,
+                        fontFamily: 'Segoe UI',
+                      ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
-          ),
         ],
       ),
     );
@@ -311,7 +327,10 @@ class _CasviumHomeShellState extends State<CasviumHomeShell>
           child: FregonaMascotWidget(
             mood: _mascotMood,
             mascotName: store.currentHousehold.mascotName,
-            speechBubble: _mascotMessage,
+            speechBubble: _mascotMessage ??
+                (store.dataSource == CasviumDataSource.example
+                    ? _exampleMascotMessage
+                    : '¿Registramos una sesión de trabajo?'),
             onTap: () {
               final tips = [
                 '¡Fregar en equipo reduce el tiempo a la mitad! Prueba a marcar un colaborador al registrar sesión.',
@@ -320,8 +339,7 @@ class _CasviumHomeShellState extends State<CasviumHomeShell>
               ];
               setState(() {
                 _mascotMood = MascotMood.celebrating;
-                _mascotMessage =
-                    tips[DateTime.now().second % tips.length];
+                _mascotMessage = tips[DateTime.now().second % tips.length];
               });
             },
           ),
@@ -1283,189 +1301,208 @@ class _CasviumHomeShellState extends State<CasviumHomeShell>
   }
 
   // =========================================================================
-  // TAB 5: CONFIGURACIÓN DE HOGAR, MIEMBROS Y POSTGRESQL EN RAILWAY
+  // TAB 5: AJUSTES
   // =========================================================================
-  Widget _buildHouseholdAndRailwayTab(BuildContext context) {
+  Widget _buildEmptyHouseholdTab() {
+    final connected = widget.store.isConnectedToRailway;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              connected
+                  ? 'No hay datos en Railway. Crea un hogar en Ajustes para empezar.'
+                  : 'Conecta con Railway en Ajustes para cargar tus datos.',
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 12),
+            CasviumActionPill(
+              label: 'Ir a Ajustes',
+              onPressed: () => setState(() => _selectedTab = 4),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _updateData(Future<void> Function() update) async {
     final store = widget.store;
-    final urlController =
-        TextEditingController(text: store.railwayDatabaseUrl);
+    final previous = (store.dataSource, store.currentHousehold.id);
+    if (_railwayAccessKeyController case final controller?) {
+      store.railwayAccessKey = controller.text;
+    }
+    await update();
+    if (!mounted || previous == (store.dataSource, store.currentHousehold.id)) {
+      return;
+    }
+    _liveTimer?.cancel();
+    setState(() {
+      _selectedRoomFilterId = null;
+      _activeTimerTaskId = null;
+      _isTimerRunning = false;
+      _liveSeconds = 0;
+      _mascotMood = MascotMood.happy;
+      _mascotMessage = null;
+    });
+  }
+
+  Widget _buildSettingsTab(BuildContext context) {
+    final store = widget.store;
+    final isRailway = store.dataSource == CasviumDataSource.railway;
 
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 8, 16, 30),
       children: [
-        Text(
-          'Hogar y Base de Datos Railway',
-          style: Theme.of(context).textTheme.headlineMedium,
-        ),
-        const Text(
-          'Configura tu conexión directa a PostgreSQL en Railway o crea un nuevo hogar compartido.',
-          style: TextStyle(
-            fontSize: 13,
-            color: CasviumColors.inkMuted,
-            fontFamily: 'Segoe UI',
-          ),
-        ),
+        Text('Ajustes', style: Theme.of(context).textTheme.headlineMedium),
         const SizedBox(height: 16),
-
-        // Tarjeta de conexión PostgreSQL Railway
         CasviumBentoCard(
           backgroundColor: const Color(0xFFEEE8F6),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Flexible(
-                    child: Container(
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: CasviumColors.plum,
-                        borderRadius: BorderRadius.circular(99),
-                        border: Border.all(color: CasviumColors.ink, width: 1.5),
+              InputDecorator(
+                decoration: _inputDecoration('Origen de los datos'),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<CasviumDataSource>(
+                    value: store.dataSource,
+                    isExpanded: true,
+                    items: const [
+                      DropdownMenuItem(
+                        value: CasviumDataSource.example,
+                        child: Text('Datos de ejemplo'),
                       ),
-                      child: const Text(
-                        'POSTGRESQL · RAILWAY CLOUD',
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          fontWeight: FontWeight.w900,
-                          color: Colors.white,
-                          letterSpacing: 0.6,
-                          fontFamily: 'Segoe UI',
-                        ),
+                      DropdownMenuItem(
+                        value: CasviumDataSource.railway,
+                        child: Text('Datos reales (Railway)'),
                       ),
-                    ),
+                    ],
+                    onChanged: store.isSyncing
+                        ? null
+                        : (source) {
+                            if (source != null) {
+                              _updateData(() => store.selectDataSource(source));
+                            }
+                          },
                   ),
-                  const SizedBox(width: 8),
-                  Icon(
-                    store.isConnectedToRailway
-                        ? Icons.cloud_done
-                        : Icons.cloud_queue,
-                    color: CasviumColors.ink,
-                  ),
+                ),
+              ),
+              if (_railwayAccessKeyController case final controller?) ...[
+                const SizedBox(height: 12),
+                TextField(
+                  controller: controller,
+                  enabled: !store.isSyncing,
+                  obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  decoration: _inputDecoration('Clave de acceso de Railway'),
+                ),
+              ],
+              if (store.isSyncing) ...[
+                const SizedBox(height: 12),
+                const LinearProgressIndicator(
+                    semanticsLabel: 'Conectando a Railway'),
+              ],
+              if (store.lastSyncMessage case final message?) ...[
+                const SizedBox(height: 12),
+                Semantics(liveRegion: true, child: Text(message)),
+              ],
+              if (isRailway) ...[
+                if (store.isConnectedToRailway &&
+                    !store.isSyncing &&
+                    !store.hasHousehold) ...[
+                  const SizedBox(height: 12),
+                  const Text('No hay datos en Railway.'),
                 ],
-              ),
-              const SizedBox(height: 10),
-              Text(
-                store.lastSyncMessage,
-                style: const TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: CasviumColors.ink,
-                  fontFamily: 'Segoe UI',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: urlController,
-                decoration: InputDecoration(
-                  hintText:
-                      'postgresql://postgres:PASS@tramway.proxy.rlwy.net:39687/railway',
-                  filled: true,
-                  fillColor: CasviumColors.surface,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
-                  ),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide:
-                        const BorderSide(color: CasviumColors.ink, width: 1.8),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(14),
-                    borderSide:
-                        const BorderSide(color: CasviumColors.ink, width: 1.8),
-                  ),
-                ),
-                style: const TextStyle(
-                  fontSize: 12.5,
-                  fontFamily: 'Consolas',
-                ),
-              ),
-              const SizedBox(height: 12),
-              Row(
-                children: [
-                  Expanded(
-                    child: CasviumActionPill(
-                      label: store.isSyncing
-                          ? 'Sincronizando...'
-                          : 'Crear Tablas y Sincronizar con Railway',
-                      icon: Icons.sync,
-                      color: CasviumColors.plum,
-                      textColor: Colors.white,
-                      onPressed: () {
-                        store.syncWithRailwayPostgres(urlController.text);
-                      },
-                    ),
-                  ),
+                if (store.hasPendingRailwayChanges) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                      'Tienes cambios pendientes de guardar en Railway.'),
                 ],
-              ),
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  onPressed: store.isSyncing
+                      ? null
+                      : () => _updateData(store.syncWithRailwayPostgres),
+                  icon: const Icon(Icons.sync),
+                  label: Text(store.hasPendingRailwayChanges
+                      ? 'Guardar cambios en Railway'
+                      : 'Actualizar desde Railway'),
+                ),
+              ],
             ],
           ),
         ),
         const SizedBox(height: 16),
 
-        // Crear un nuevo hogar desde cero
-        CasviumBentoCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'GESTIÓN DEL HOGAR ACTUAL',
-                style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: 0.8,
-                  color: CasviumColors.inkMuted,
-                  fontFamily: 'Segoe UI',
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'Hogar: ${store.currentHousehold.name}',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              Text(
-                'Código de invitación: ${store.currentHousehold.inviteCode} · Mascota: ${store.currentHousehold.mascotName}',
-                style: const TextStyle(
-                  fontSize: 13,
-                  color: CasviumColors.inkMuted,
-                  fontFamily: 'Segoe UI',
-                ),
-              ),
-              const SizedBox(height: 14),
-              Wrap(
-                spacing: 10,
-                runSpacing: 10,
+        if (store.hasHousehold || store.isConnectedToRailway)
+          IgnorePointer(
+            ignoring: store.isSyncing,
+            child: CasviumBentoCard(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  CasviumActionPill(
-                    label: 'Crear Nuevo Hogar',
-                    icon: Icons.home_work_outlined,
-                    color: CasviumColors.terracotta,
-                    onPressed: () => _openCreateHouseholdDialog(context),
+                  const Text(
+                    'GESTIÓN DEL HOGAR ACTUAL',
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.8,
+                      color: CasviumColors.inkMuted,
+                      fontFamily: 'Segoe UI',
+                    ),
                   ),
-                  CasviumActionPill(
-                    label: 'Añadir Miembro',
-                    icon: Icons.person_add_alt_1,
-                    color: CasviumColors.sage,
-                    onPressed: () => _openAddMemberDialog(context),
-                  ),
-                  CasviumActionPill(
-                    label: 'Añadir Estancia',
-                    icon: Icons.meeting_room_outlined,
-                    color: CasviumColors.cobalt,
-                    onPressed: () => _openAddRoomDialog(context),
+                  const SizedBox(height: 8),
+                  if (store.hasHousehold) ...[
+                    Text(
+                      'Hogar: ${store.currentHousehold.name}',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    Text(
+                      'Código de invitación: ${store.currentHousehold.inviteCode} · Mascota: ${store.currentHousehold.mascotName}',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: CasviumColors.inkMuted,
+                        fontFamily: 'Segoe UI',
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 14),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 10,
+                    children: [
+                      CasviumActionPill(
+                        label: 'Crear Nuevo Hogar',
+                        icon: Icons.home_work_outlined,
+                        color: CasviumColors.terracotta,
+                        onPressed: () => _openCreateHouseholdDialog(context),
+                      ),
+                      if (store.hasHousehold) ...[
+                        CasviumActionPill(
+                          label: 'Añadir Miembro',
+                          icon: Icons.person_add_alt_1,
+                          color: CasviumColors.sage,
+                          onPressed: () => _openAddMemberDialog(context),
+                        ),
+                        CasviumActionPill(
+                          label: 'Añadir Estancia',
+                          icon: Icons.meeting_room_outlined,
+                          color: CasviumColors.cobalt,
+                          onPressed: () => _openAddRoomDialog(context),
+                        ),
+                      ],
+                    ],
                   ),
                 ],
               ),
-            ],
+            ),
           ),
-        ),
       ],
     );
   }
@@ -2007,7 +2044,10 @@ class _CasviumHomeShellState extends State<CasviumHomeShell>
   void _openCreateHouseholdDialog(BuildContext context) {
     final homeNameCtrl = TextEditingController();
     final mascotCtrl = TextEditingController(text: 'Don Mocho');
-    final membersCtrl = TextEditingController(text: 'Ana, Carlos, Elena');
+    final membersCtrl = TextEditingController(
+        text: widget.store.dataSource == CasviumDataSource.example
+            ? 'Ana, Carlos, Elena'
+            : '');
 
     showDialog(
       context: context,

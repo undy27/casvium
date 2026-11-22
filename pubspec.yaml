@@ -11,6 +11,8 @@ dependencies:
     sdk: flutter
   postgres: ^3.2.0
   intl: ^0.19.0
+  http: ^1.5.0
+  uuid: ^4.5.1
   shared_preferences: ^2.2.3
 
 dev_dependencies:
@@ -20,3 +22,6 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - sql/household_snapshot.sql
+    - sql/railway_compatibility.sql

@@ -8,6 +8,49 @@ import 'package:casvium/services/railway_postgres_service.dart';
 import 'package:casvium/data/chore_icons.dart';
 
 void main() {
+  testWidgets('Datos reales no muestra ejemplos si falla la conexión o Railway está vacío',
+      (tester) async {
+    var railwayAvailable = false;
+    final store = CasviumStore(
+      loadRailway: (_, __) async {
+        if (!railwayAvailable) throw StateError('sin conexión');
+        return null;
+      },
+    )..railwayConnection = 'conexión de prueba';
+    await tester.pumpWidget(CasviumApp(store: store));
+    await _openTab(tester, 'pantry_jars');
+
+    final selector = find.byType(DropdownButton<CasviumDataSource>);
+    Future<void> select(String label) async {
+      await tester.tap(selector);
+      await _finishTransition(tester);
+      await tester.tap(find.text(label).last);
+      await _finishTransition(tester);
+    }
+
+    await select('Datos reales (Railway)');
+    expect(store.dataSource, CasviumDataSource.railway);
+    expect(store.hasHousehold, isFalse);
+    expect(find.textContaining('No se pudo acceder a Railway'), findsOneWidget);
+    expect(find.text('No hay datos en Railway.'), findsNothing);
+    expect(find.text('Casa Los Olivos 4B'), findsNothing);
+
+    railwayAvailable = true;
+    await tester.tap(find.text('Actualizar desde Railway'));
+    await _finishTransition(tester);
+    expect(store.dataSource, CasviumDataSource.railway);
+    expect(store.hasHousehold, isFalse);
+    expect(find.text('No hay datos en Railway.'), findsOneWidget);
+    await _openTab(tester, 'broom_dustpan');
+    expect(find.textContaining('No hay datos en Railway.'), findsOneWidget);
+
+    await _openTab(tester, 'pantry_jars');
+    await select('Datos de ejemplo');
+    expect(store.dataSource, CasviumDataSource.example);
+    expect(store.currentHousehold.name, 'Casa Los Olivos 4B');
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('Casvium carga el hogar inicial, 30 iconos y mascota Don Mocho',
       (WidgetTester tester) async {
     final store = CasviumStore();

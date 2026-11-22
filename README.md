@@ -19,7 +19,8 @@ Aplicación Flutter con diseño **Neo-Bento Artesanal** (sin aspecto genérico d
    - **Don Mocho** (`lib/widgets/fregona_mascot.dart`): Fregona humanizada animada con flecos dinámicos, parpadeo, burbujas de jabón y estados (`happy`, `scrubbing`, `celebrating`).
    - **Gráficas propias** (`lib/widgets/custom_charts.dart`): Anillo de equidad entre miembros, curva semanal de pulso doméstico y mapa de dedicación por estancia.
 6. **PostgreSQL en Railway**:
-   - Esquema SQL completo en `sql/railway_schema.sql` y sincronización directa desde la pestaña **Railway DB** introduciendo el `DATABASE_URL` (`postgresql://...`) de tu instancia en Railway.
+   - En **Ajustes → Origen de los datos** puedes alternar entre **Datos de ejemplo** y **Datos reales (Railway)**. Si tienes cambios en el hogar real, usa **Guardar cambios en Railway** para enviarlos a PostgreSQL.
+   - En la app nativa, introduce la URL pública de PostgreSQL de Railway (`postgresql://...`). En la web, configura `DATABASE_URL` y `CASVIUM_DATA_ACCESS_KEY` en el servidor. Usa una clave larga y aleatoria e introdúcela en Ajustes. La app conserva el origen seleccionado y solicita las credenciales nuevamente al reiniciar.
 
 ## Ejecución
 
