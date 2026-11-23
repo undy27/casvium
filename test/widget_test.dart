@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,15 +11,21 @@ import 'package:casvium/data/chore_icons.dart';
 void main() {
   testWidgets('Datos reales no muestra ejemplos si falla la conexión o Railway está vacío',
       (tester) async {
+    const databaseUrl = 'postgresql://localhost/railway_test';
+    const accessKey = 'clave de prueba';
     var railwayAvailable = false;
+    String? usedConnection;
     final store = CasviumStore(
-      loadRailway: (_, __) async {
+      railwayDatabaseUrl: databaseUrl,
+      loadRailway: (connection, _) async {
+        usedConnection = connection;
         if (!railwayAvailable) throw StateError('sin conexión');
         return null;
       },
-    )..railwayConnection = 'conexión de prueba';
+    )..railwayAccessKey = accessKey;
     await tester.pumpWidget(CasviumApp(store: store));
     await _openTab(tester, 'pantry_jars');
+    expect(find.byType(TextField), kIsWeb ? findsOneWidget : findsNothing);
 
     final selector = find.byType(DropdownButton<CasviumDataSource>);
     Future<void> select(String label) async {
@@ -29,6 +36,7 @@ void main() {
     }
 
     await select('Datos reales (Railway)');
+    expect(usedConnection, kIsWeb ? accessKey : databaseUrl);
     expect(store.dataSource, CasviumDataSource.railway);
     expect(store.hasHousehold, isFalse);
     expect(find.textContaining('No se pudo acceder a Railway'), findsOneWidget);

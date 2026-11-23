@@ -307,8 +307,8 @@ flutter pub get
 # 3. Ejecutar la aplicación
 flutter run
 
-# 4. (Opcional) Ejecutar inyectando directamente la URL pública de Railway Postgres
-flutter run --dart-define=DATABASE_URL=postgresql://postgres:<PASSWORD>@tramway.proxy.rlwy.net:39687/railway
+# 4. Ejecutar una compilación nativa con la conexión privada configurada
+flutter run --dart-define-from-file="$HOME/.config/casvium/railway.local.json"
 ```
 
 ### Ejecución de tests

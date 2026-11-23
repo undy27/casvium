@@ -20,7 +20,7 @@ Aplicación Flutter con diseño **Neo-Bento Artesanal** (sin aspecto genérico d
    - **Gráficas propias** (`lib/widgets/custom_charts.dart`): Anillo de equidad entre miembros, curva semanal de pulso doméstico y mapa de dedicación por estancia.
 6. **PostgreSQL en Railway**:
    - En **Ajustes → Origen de los datos** puedes alternar entre **Datos de ejemplo** y **Datos reales (Railway)**. Si tienes cambios en el hogar real, usa **Guardar cambios en Railway** para enviarlos a PostgreSQL.
-   - En la app nativa, introduce la URL pública de PostgreSQL de Railway (`postgresql://...`). En la web, configura `DATABASE_URL` y `CASVIUM_DATA_ACCESS_KEY` en el servidor. Usa una clave larga y aleatoria e introdúcela en Ajustes. La app conserva el origen seleccionado y solicita las credenciales nuevamente al reiniciar.
+   - Para compilar la app nativa de uso privado, pasa `DATABASE_PUBLIC_URL` mediante `--dart-define-from-file` con un archivo JSON privado. En la web, `DATABASE_URL` se configura en el servidor y Ajustes solicita la clave `CASVIUM_DATA_ACCESS_KEY`.
 
 ## Ejecución
 
@@ -28,4 +28,10 @@ Aplicación Flutter con diseño **Neo-Bento Artesanal** (sin aspecto genérico d
 flutter create .
 flutter pub get
 flutter run
+```
+
+Si tienes la configuración nativa de Railway guardada en `~/.config/casvium/railway.local.json`, ejecútala con:
+
+```bash
+flutter run --dart-define-from-file="$HOME/.config/casvium/railway.local.json"
 ```

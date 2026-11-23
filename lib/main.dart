@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'screens/casvium_home_shell.dart';
@@ -14,6 +17,11 @@ Future<void> main() async {
   }
   final store = CasviumStore(preferences: preferences);
   runApp(CasviumApp(store: store));
+  if (!kIsWeb &&
+      store.dataSource == CasviumDataSource.railway &&
+      !store.hasPendingRailwayChanges) {
+    unawaited(store.syncWithRailwayPostgres());
+  }
 }
 
 class CasviumApp extends StatelessWidget {

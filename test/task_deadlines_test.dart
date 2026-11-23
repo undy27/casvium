@@ -133,6 +133,7 @@ void main() {
     HouseholdSnapshot? uploaded;
     final store = CasviumStore(
       preferences: preferences,
+      railwayDatabaseUrl: 'postgresql://localhost/railway_test',
       loadRailway: (_, id) async {
         expect(id, reads == 0 ? '' : household.id);
         reads++;
@@ -147,7 +148,7 @@ void main() {
         );
       },
       saveRailway: (_, snapshot) async => uploaded = snapshot,
-    )..railwayConnection = 'conexión de prueba';
+    )..railwayAccessKey = 'clave de prueba';
 
     final exampleTask = store.currentTasks.first;
     store.updateChoreTaskFrequency(exampleTask.id, TaskFrequency.none);
@@ -206,13 +207,14 @@ void main() {
     final preferences = await SharedPreferences.getInstance();
     final store = CasviumStore(
       preferences: preferences,
+      railwayDatabaseUrl: 'postgresql://localhost/railway_test',
       loadRailway: (_, id) async {
         expect(id, isEmpty);
         return snapshot;
       },
       saveRailway: (_, __) async =>
           fail('Se intentó subir el hogar de ejemplo'),
-    )..railwayConnection = 'conexión de prueba';
+    )..railwayAccessKey = 'clave de prueba';
     expect(store.dataSource, CasviumDataSource.railway);
     expect(store.hasHousehold, isFalse);
     expect(store.hasPendingRailwayChanges, isFalse);
